@@ -92,11 +92,17 @@ export function StudentSelfCheckPage() {
   const [history, setHistory] = useState<SelfCheckReport[]>([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState<number | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     api.ai.history()
       .then(setHistory)
       .catch(() => {});
+    // Proactively surface whether AI grading is available so the page never
+    // looks "broken" when no API key is configured (demo-safe).
+    api.health()
+      .then(h => setAiEnabled(h.ai_enabled))
+      .catch(() => setAiEnabled(null));
   }, []);
 
   const handleAnalyze = async () => {
@@ -149,6 +155,12 @@ export function StudentSelfCheckPage() {
             <div style={{ fontSize: 18, fontWeight: 800, color: palette.deepBurgundy, marginBottom: 4 }}>Check Your Work</div>
             <div style={{ fontSize: 13, fontWeight: 500, color: "rgba(92,30,38,0.6)", marginBottom: 20 }}>Upload your assignment rubric and your work to get an AI-estimated grade report powered by Claude.</div>
 
+            {aiEnabled === false && (
+              <div style={{ padding: "12px 16px", backgroundColor: "rgba(139,115,85,0.08)", border: "1px solid rgba(139,115,85,0.35)", borderRadius: 8, fontSize: 13, color: "#6b5638", marginBottom: 16 }}>
+                <strong>AI grading is currently disabled.</strong> This demo is running without an Anthropic API key, so the Self-Check grader is unavailable. Add <code>ANTHROPIC_API_KEY</code> to <code>server/.env</code> and restart the server to enable it. Everything else in D.I.Y.A still works.
+              </div>
+            )}
+
             {apiError && (
               <div style={{ padding: "12px 16px", backgroundColor: "#fff0f2", border: "1px solid #f9a8b4", borderRadius: 8, fontSize: 13, color: palette.crimson, marginBottom: 16 }}>
                 <strong>Error:</strong> {apiError}
@@ -178,8 +190,8 @@ export function StudentSelfCheckPage() {
                 </button>
               </div>
             </div>
-            <button type="button" onClick={handleAnalyze} disabled={!rubricFile || !workFile || isAnalyzing} style={{ padding: "12px 28px", borderRadius: 10, border: "none", backgroundColor: rubricFile && workFile && !isAnalyzing ? palette.crimson : "rgba(162,34,55,0.3)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: rubricFile && workFile && !isAnalyzing ? "pointer" : "not-allowed" }}>
-              {isAnalyzing ? "Analyzing with AI…" : "Analyze My Work"}
+            <button type="button" onClick={handleAnalyze} disabled={!rubricFile || !workFile || isAnalyzing || aiEnabled === false} style={{ padding: "12px 28px", borderRadius: 10, border: "none", backgroundColor: rubricFile && workFile && !isAnalyzing && aiEnabled !== false ? palette.crimson : "rgba(162,34,55,0.3)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: rubricFile && workFile && !isAnalyzing && aiEnabled !== false ? "pointer" : "not-allowed" }}>
+              {isAnalyzing ? "Analyzing with AI…" : aiEnabled === false ? "AI Grading Disabled" : "Analyze My Work"}
             </button>
           </div>
 

@@ -72,12 +72,19 @@ D.I.Y.A/
 │       └── api.ts                # All API calls + TypeScript types
 │
 ├── server/                       # Backend (Node.js + Express)
-│   ├── server.js                 # Main server, all routes, DB schema
+│   ├── server.js                 # All routes, auth, RBAC, error handler
+│   ├── db.js                     # Shared schema + migrations (server + seed)
+│   ├── seed.js                   # Demo data generator (npm run seed)
 │   ├── services/
 │   │   ├── ai-workflow.js        # Full AI routing pipeline
 │   │   └── rag.js                # RAG: embed, chunk, retrieve
-│   ├── diya.db                   # SQLite database (auto-created)
-│   └── .env                      # API keys (never commit)
+│   ├── test/                     # node:test suites (api / workflow / rag)
+│   ├── .env.example              # Copy to .env (keys never committed)
+│   └── diya.db                   # SQLite database (git-ignored, auto-created)
+│
+├── scripts/dev-all.mjs           # Runs backend + frontend together
+├── tsconfig.json                 # Type-check config (npm run check)
+├── .github/workflows/ci.yml      # CI: backend tests + frontend build/check
 │
 ├── AI_PIPELINE.md                # Every AI function documented
 ├── SYSTEM_DESIGN.md              # Architecture + schema deep dive
@@ -93,48 +100,82 @@ D.I.Y.A/
 ## Getting Started
 
 ### Prerequisites
-- Node.js v18+
-- An Anthropic API key (get one at [console.anthropic.com](https://console.anthropic.com))
+- Node.js v18+ (tested on v20 in CI; works on v26)
+- An Anthropic API key is **optional** — without one, the app runs in a
+  deterministic demo mode (keyword topic classification, template answers,
+  graceful "AI disabled" states). Add a key to enable real AI answers,
+  confidence scoring, analysis, and self-check grading.
 
 ### Installation
 
 ```bash
-# Install frontend dependencies
+# 1. Install frontend dependencies
 npm install
 
-# Install backend dependencies
+# 2. Install backend dependencies
 cd server && npm install && cd ..
 ```
 
 ### Environment Setup
 
-Create `server/.env`:
+```bash
+cp server/.env.example server/.env
+# then edit server/.env (ANTHROPIC_API_KEY is optional for the demo)
+```
 
+### Seed the demo database (recommended)
+
+```bash
+npm run seed          # → creates server/diya.db with a full CHEM 1301 demo class
 ```
-PORT=3001
-JWT_SECRET=your-secret-key-here
-ANTHROPIC_API_KEY=sk-ant-...
-```
+
+This populates a believable class: 1 professor, 4 students, 14 forum questions
+(verified / pending / escalated), approved answers, confusion clusters, an
+intervention with tracked effectiveness, office-hour requests, a self-check
+report, AI metrics, and notifications. Safe to run on a fresh clone (the schema
+lives in `server/db.js`, shared by the server and the seed script).
 
 ### Running
 
 ```bash
-# Option 1: Start both at once
-./start.sh
+npm run dev:all       # backend + frontend together (recommended)
 
-# Option 2: Separately
-npm run dev               # Frontend → http://localhost:5173
-cd server && node server.js  # Backend → http://localhost:3001
+# …or run them separately:
+npm run server        # Backend → http://localhost:3001
+npm run dev           # Frontend → http://localhost:5173
 ```
 
-### First Run
+### Demo Credentials
 
-1. Go to `http://localhost:5173`
-2. Sign up as a **professor**
-3. Create a class group — you'll get an invite code
-4. Sign up as a **student**, join with the code
-5. Post a forum question as the student
-6. Watch the AI routing engine process it (check the Workflow Queue as professor)
+After `npm run seed`, log in with (all passwords are `demo1234`, **local demo only**):
+
+| Role | Email | Notes |
+|---|---|---|
+| Professor | `dr.chen@university.edu` | Owns CHEM 1301, sees the workflow queue, clusters, metrics |
+| Student | `alex.r@uni.edu` | Member of CHEM 1301 |
+| Student | `priya.p@uni.edu` | Member of CHEM 1301 |
+| — | Group invite code | `CHEM01` |
+
+### Try it from scratch (the real flow)
+
+1. Sign up as a **professor** → create a class group (you get an invite code).
+2. Sign up as a **student** → join with the code.
+3. Post a forum question as the student.
+4. Watch the AI routing engine process it: open the **Workflow Queue** as the professor.
+5. Approve an AI answer → it appears verified to the student and lands in the **Answer Library**.
+
+### Available scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Vite dev server (frontend) |
+| `npm run server` | Express API |
+| `npm run dev:all` | both, together (Ctrl-C stops both) |
+| `npm run seed` | (re)build the demo database |
+| `npm run build` | production frontend build |
+| `npm run preview` | preview the production build |
+| `npm run check` | TypeScript type-check (`tsc --noEmit`) |
+| `npm test` | backend test suite (delegates to `server`) |
 
 ---
 
@@ -159,6 +200,113 @@ cd server && node server.js  # Backend → http://localhost:3001
 | `/admin/:groupName` | AI observability | Professor |
 | `/calendar/:groupName` | Class calendar | Professor |
 | `/requests/:groupName` | Office hour requests | Professor |
+
+---
+
+## Testing & CI
+
+Automated tests run in GitHub Actions on every push/PR (`.github/workflows/ci.yml`):
+the backend suite (`cd server && npm test`) plus a frontend type-check and build.
+
+- **30 backend tests** (`node:test`) covering auth, group create/join, forum posting,
+  workflow record creation, professor approval/rejection, knowledge-doc listing,
+  admin health/metrics, and **RBAC** (non-members and non-owners get `403`), plus
+  unit tests for the AI-workflow fallbacks (topic classification, duplicate
+  detection, intervention/announcement fallbacks, routing when AI is disabled) and
+  RAG helpers (chunking, cosine similarity).
+- See [TESTING.md](TESTING.md) for the full coverage map.
+
+```bash
+npm test          # backend unit + integration tests (isolated temp DB)
+npm run check     # frontend type-check
+```
+
+---
+
+## What This Project Demonstrates (for reviewers)
+
+| Area | Where to look |
+|---|---|
+| **Full-stack architecture** | React/Vite SPA ↔ Express API ↔ SQLite, with a Vite dev proxy |
+| **Role-based access control** | `requireAuth` / `requireRole` / `requireGroupAccess` in `server/server.js` — professors are scoped to groups they own, students to groups they joined |
+| **AI workflow orchestration** | `server/services/ai-workflow.js`: classify → dedupe → RAG → draft → confidence-score → route/escalate → record |
+| **RAG document retrieval** | `server/services/rag.js`: local embeddings (`all-MiniLM-L6-v2`), chunking, cosine similarity, PDF/DOCX/TXT/MD ingestion |
+| **Async, job-style processing** | questions are routed asynchronously after the POST returns; results land in the workflow queue |
+| **Observability** | `ai_metrics` table + `/api/admin/metrics` (latency, tokens, error/escalation/duplicate rates) |
+| **Human-in-the-loop review** | every AI answer is "pending professor review" until approved; approvals feed the reusable answer library |
+| **SQLite schema design** | `server/db.js` — 13 tables, foreign keys, WAL mode, additive migrations |
+| **API design** | consistent REST surface, typed client in `src/lib/api.ts` |
+| **Testing / CI** | `server/test/*`, GitHub Actions, type-check + build gate |
+| **Graceful degradation** | the app is fully usable with **no** API key (deterministic fallbacks + clear "AI disabled" UI) |
+
+---
+
+## Known Limitations / Future Work
+
+Honest tradeoffs made to keep the project focused:
+
+- **Demo-only pages.** A few professor/student screens render representative
+  static data rather than live API calls: `EditGroupPage`, `CalendarPage`,
+  `TopicDetailPage`, and `student/TopicAnalysisPage`. The data flow they depict is
+  real; wiring them to endpoints is future work. (`RequestsPage` **was** mock and
+  is now fully wired to the office-hours API.)
+- **Duplicate detection uses lexical Jaccard similarity**, not embeddings —
+  cheap and dependency-free, but it misses paraphrases. Embedding-based dedupe
+  (the RAG model is already loaded) is the natural upgrade.
+- **No rate limiting yet.** Documented intentionally (see Security below); the
+  next step is `express-rate-limit` on auth + AI endpoints.
+- **No frontend component tests** (only type-check + build). React Testing
+  Library / Vitest is the planned addition.
+- **RAG retrieval isn't unit-tested end-to-end** because it requires downloading
+  the embedding model; only the pure helpers are tested.
+- **AI answer quality depends on the configured model**; without an API key the
+  app uses deterministic template fallbacks (clearly surfaced in the UI).
+
+---
+
+## Security Notes
+
+- **Auth**: bcrypt (cost 12) password hashing; JWT (7-day). `JWT_SECRET` is
+  required in production — the server refuses to boot on the dev fallback when
+  `NODE_ENV=production`.
+- **Authorization**: every group-scoped route enforces ownership/membership, so a
+  logged-in user cannot read or mutate another class's data.
+- **Error hygiene**: a central error handler returns generic messages — no stack
+  traces or file paths leak to clients; unknown `/api/*` routes return JSON `404`.
+- **Uploads**: 20 MB limit, type-checked (PDF/DOCX/TXT/MD), stored as text chunks
+  (raw files are never persisted).
+- **CORS** is env-configurable via `CORS_ORIGIN` (defaults to any localhost port
+  for development).
+- **Rate limiting** is intentionally **not** included yet — out of scope for a
+  single-node demo. For production, add `express-rate-limit` to `/api/auth/*` and
+  the AI endpoints.
+
+---
+
+## Deployment Notes
+
+- **Backend**: any Node host (Render/Railway/Fly/VM). Set `NODE_ENV=production`,
+  a strong `JWT_SECRET`, `CORS_ORIGIN=https://<your-frontend>`, and optionally
+  `ANTHROPIC_API_KEY`. SQLite (`DB_PATH`) needs a persistent disk; for higher
+  scale, migrate the schema in `server/db.js` to Postgres.
+- **Frontend**: `npm run build` → deploy the static `dist/` to any static host
+  (Vercel/Netlify/S3). Point the SPA's `/api` calls at the deployed backend
+  (replace the dev proxy with the API origin, or serve both behind one domain).
+
+---
+
+## Screenshots
+
+> _Add screenshots/GIFs here for recruiters._ Suggested capture checklist (after
+> `npm run seed`):
+>
+> - [ ] Professor dashboard (`/professor`) — class cards
+> - [ ] Workflow Queue (`/workflow/CHEM%201301%20—%20General%20Chemistry`) — escalated questions with confidence scores
+> - [ ] Confusion clusters + an intervention with tracked effectiveness
+> - [ ] Knowledge Base upload (`/knowledge/...`) — document with chunk count
+> - [ ] Admin observability (`/admin/...`) — latency / tokens / escalation rate
+> - [ ] Student forum thread — "AI Answer — Awaiting Review" vs "Verified by Professor"
+> - [ ] Self-Check report (or the "AI disabled" state if running keyless)
 
 ---
 

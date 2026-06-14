@@ -3,9 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const Database = require('better-sqlite3');
-const path = require('path');
 const multer = require('multer');
+const { createDb } = require('./db');
 const workflow = require('./services/ai-workflow');
 const rag = require('./services/rag');
 
@@ -13,214 +12,27 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+// JWT secret: a dev fallback is fine locally, but refuse to boot in production
+// without an explicit secret so a deploy can never run on a known-public key.
 const JWT_SECRET = process.env.JWT_SECRET || 'diya-dev-secret';
+if (IS_PROD && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'diya-dev-secret')) {
+  throw new Error('JWT_SECRET must be set to a strong, unique value in production.');
+}
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors({ origin: /^http:\/\/localhost:\d+$/, credentials: true }));
+// CORS is env-configurable for deployment. CORS_ORIGIN can be a comma-separated
+// allowlist; if unset we allow any localhost port for local development.
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+  : /^http:\/\/localhost:\d+$/;
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
 // ─── Database ─────────────────────────────────────────────────────────────────
-const db = new Database(path.join(__dirname, 'diya.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const db = createDb();
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('student','professor')),
-    avatar TEXT,
-    bio TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    code TEXT UNIQUE NOT NULL,
-    description TEXT,
-    professor_id INTEGER NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (professor_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS group_members (
-    user_id INTEGER NOT NULL,
-    group_id INTEGER NOT NULL,
-    joined_at TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, group_id),
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (group_id) REFERENCES groups(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS forum_questions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
-    tags TEXT,
-    topic TEXT,
-    ai_answer TEXT,
-    ai_status TEXT DEFAULT 'pending' CHECK(ai_status IN ('pending','generating','verified','rejected')),
-    confidence_score REAL,
-    routing_decision TEXT DEFAULT 'normal',
-    duplicate_of INTEGER,
-    escalation_reason TEXT,
-    upvotes INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (group_id) REFERENCES groups(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS forum_replies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    question_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    body TEXT NOT NULL,
-    upvotes INTEGER DEFAULT 0,
-    is_accepted INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (question_id) REFERENCES forum_questions(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS office_hour_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL,
-    student_id INTEGER NOT NULL,
-    subject TEXT NOT NULL,
-    description TEXT,
-    status TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','completed')),
-    preferred_time TEXT,
-    scheduled_at TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (group_id) REFERENCES groups(id),
-    FOREIGN KEY (student_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS self_check_reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    assignment_name TEXT NOT NULL,
-    rubric_name TEXT NOT NULL,
-    letter_grade TEXT,
-    score_text TEXT,
-    improvements_json TEXT,
-    raw_analysis TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  -- ── Workflow Engine Tables ────────────────────────────────────────────────
-  CREATE TABLE IF NOT EXISTS workflow_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    question_id INTEGER NOT NULL,
-    group_id INTEGER NOT NULL,
-    status TEXT DEFAULT 'processed' CHECK(status IN ('processed','escalated','resolved','auto_resolved')),
-    routing_decision TEXT DEFAULT 'normal',
-    duplicate_of INTEGER,
-    confidence_score REAL,
-    topic TEXT,
-    escalation_reason TEXT,
-    resolved_by INTEGER,
-    resolved_at TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (question_id) REFERENCES forum_questions(id),
-    FOREIGN KEY (group_id) REFERENCES groups(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS confusion_clusters (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL,
-    topic TEXT NOT NULL,
-    question_count INTEGER DEFAULT 0,
-    severity TEXT DEFAULT 'low' CHECK(severity IN ('low','medium','high','critical')),
-    status TEXT DEFAULT 'open' CHECK(status IN ('open','intervention_sent','resolved')),
-    first_seen TEXT DEFAULT (datetime('now')),
-    last_seen TEXT DEFAULT (datetime('now')),
-    UNIQUE(group_id, topic)
-  );
-
-  CREATE TABLE IF NOT EXISTS interventions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL,
-    cluster_id INTEGER,
-    type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_by INTEGER NOT NULL,
-    status TEXT DEFAULT 'draft' CHECK(status IN ('draft','sent','tracked')),
-    outcome_before INTEGER,
-    outcome_after INTEGER,
-    effectiveness REAL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (group_id) REFERENCES groups(id),
-    FOREIGN KEY (created_by) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS approved_answers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL,
-    source_question_id INTEGER,
-    topic TEXT,
-    question_pattern TEXT NOT NULL,
-    answer TEXT NOT NULL,
-    usage_count INTEGER DEFAULT 0,
-    created_by INTEGER NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (group_id) REFERENCES groups(id),
-    FOREIGN KEY (created_by) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    message TEXT NOT NULL,
-    link TEXT,
-    read INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS ai_metrics (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_type TEXT NOT NULL,
-    model TEXT,
-    latency_ms INTEGER,
-    success INTEGER DEFAULT 1,
-    error_message TEXT,
-    tokens_used INTEGER DEFAULT 0,
-    group_id INTEGER,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS knowledge_documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL,
-    filename TEXT NOT NULL,
-    content_type TEXT,
-    chunk_text TEXT NOT NULL,
-    chunk_index INTEGER DEFAULT 0,
-    embedding TEXT,
-    uploaded_by INTEGER NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (group_id) REFERENCES groups(id)
-  );
-`);
-
-// Migrate: add missing columns to existing tables
-try { db.exec("ALTER TABLE forum_questions ADD COLUMN topic TEXT"); } catch {}
-try { db.exec("ALTER TABLE forum_questions ADD COLUMN confidence_score REAL"); } catch {}
-try { db.exec("ALTER TABLE forum_questions ADD COLUMN routing_decision TEXT DEFAULT 'normal'"); } catch {}
-try { db.exec("ALTER TABLE forum_questions ADD COLUMN duplicate_of INTEGER"); } catch {}
-try { db.exec("ALTER TABLE forum_questions ADD COLUMN escalation_reason TEXT"); } catch {}
-try { db.exec("ALTER TABLE forum_questions ADD COLUMN rag_sources TEXT"); } catch {}
-try { db.exec("ALTER TABLE knowledge_documents ADD COLUMN embedding TEXT"); } catch {}
 
 // ─── Notification helper ──────────────────────────────────────────────────────
 function notify(userId, type, title, message, link = null) {
@@ -251,11 +63,37 @@ function requireRole(role) {
   };
 }
 
+// ─── Group authorization ──────────────────────────────────────────────────────
+// Returns true if the user may access the group: professors must OWN it,
+// students must be a MEMBER of it. This closes the hole where any authenticated
+// user could read/write any group's data regardless of enrollment.
+function userCanAccessGroup(user, groupId) {
+  const group = db.prepare('SELECT professor_id FROM groups WHERE id = ?').get(groupId);
+  if (!group) return false;
+  if (user.role === 'professor') return group.professor_id === user.id;
+  const member = db.prepare('SELECT 1 FROM group_members WHERE user_id = ? AND group_id = ?').get(user.id, groupId);
+  return !!member;
+}
+
+// Middleware factory. `param` is the route param holding the group id.
+function requireGroupAccess(param = 'groupId') {
+  return (req, res, next) => {
+    const groupId = req.params[param];
+    if (!userCanAccessGroup(req.user, groupId)) {
+      return res.status(403).json({ error: 'You do not have access to this group' });
+    }
+    next();
+  };
+}
+
 // ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
   const { name, email, password, role } = req.body;
   if (!name || !email || !password || !role) return res.status(400).json({ error: 'All fields required' });
   if (!['student', 'professor'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
+  if (typeof password !== 'string' || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (typeof name !== 'string' || name.length > 120) return res.status(400).json({ error: 'Name is too long' });
   try {
     const hash = await bcrypt.hash(password, 12);
     const result = db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)').run(name, email.toLowerCase(), hash, role);
@@ -310,7 +148,7 @@ app.post('/api/groups', requireAuth, requireRole('professor'), (req, res) => {
   res.json(db.prepare('SELECT * FROM groups WHERE id = ?').get(result.lastInsertRowid));
 });
 
-app.get('/api/groups/:id', requireAuth, (req, res) => {
+app.get('/api/groups/:id', requireAuth, requireGroupAccess('id'), (req, res) => {
   const group = db.prepare(`SELECT g.*, u.name as professor_name, (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count FROM groups g JOIN users u ON g.professor_id = u.id WHERE g.id = ?`).get(req.params.id);
   if (!group) return res.status(404).json({ error: 'Group not found' });
   res.json(group);
@@ -319,6 +157,7 @@ app.get('/api/groups/:id', requireAuth, (req, res) => {
 app.get('/api/groups/by-name/:name', requireAuth, (req, res) => {
   const group = db.prepare(`SELECT g.*, u.name as professor_name FROM groups g JOIN users u ON g.professor_id = u.id WHERE g.name = ?`).get(decodeURIComponent(req.params.name));
   if (!group) return res.status(404).json({ error: 'Group not found' });
+  if (!userCanAccessGroup(req.user, group.id)) return res.status(403).json({ error: 'You do not have access to this group' });
   res.json(group);
 });
 
@@ -334,12 +173,12 @@ app.post('/api/groups/join', requireAuth, requireRole('student'), (req, res) => 
   }
 });
 
-app.get('/api/groups/:id/members', requireAuth, (req, res) => {
+app.get('/api/groups/:id/members', requireAuth, requireGroupAccess('id'), (req, res) => {
   res.json(db.prepare(`SELECT u.id, u.name, u.email, u.avatar, gm.joined_at FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?`).all(req.params.id));
 });
 
 // ─── FORUM ROUTES ─────────────────────────────────────────────────────────────
-app.get('/api/groups/:groupId/forum', requireAuth, (req, res) => {
+app.get('/api/groups/:groupId/forum', requireAuth, requireGroupAccess('groupId'), (req, res) => {
   const questions = db.prepare(`
     SELECT q.*, u.name as author_name,
       (SELECT COUNT(*) FROM forum_replies WHERE question_id = q.id) as reply_count
@@ -349,7 +188,7 @@ app.get('/api/groups/:groupId/forum', requireAuth, (req, res) => {
   res.json(questions);
 });
 
-app.post('/api/groups/:groupId/forum', requireAuth, async (req, res) => {
+app.post('/api/groups/:groupId/forum', requireAuth, requireGroupAccess('groupId'), async (req, res) => {
   const { title, body, tags } = req.body;
   if (!title || !body) return res.status(400).json({ error: 'Title and body required' });
 
@@ -371,6 +210,7 @@ app.post('/api/groups/:groupId/forum', requireAuth, async (req, res) => {
 app.get('/api/forum/question/:id', requireAuth, (req, res) => {
   const question = db.prepare(`SELECT q.*, u.name as author_name FROM forum_questions q JOIN users u ON q.user_id = u.id WHERE q.id = ?`).get(req.params.id);
   if (!question) return res.status(404).json({ error: 'Question not found' });
+  if (!userCanAccessGroup(req.user, question.group_id)) return res.status(403).json({ error: 'You do not have access to this question' });
   const replies = db.prepare(`SELECT r.*, u.name as author_name, u.role as author_role FROM forum_replies r JOIN users u ON r.user_id = u.id WHERE r.question_id = ? ORDER BY r.created_at ASC`).all(req.params.id);
   res.json({ ...question, replies });
 });
@@ -378,6 +218,9 @@ app.get('/api/forum/question/:id', requireAuth, (req, res) => {
 app.post('/api/forum/question/:id/reply', requireAuth, (req, res) => {
   const { body } = req.body;
   if (!body) return res.status(400).json({ error: 'Reply body required' });
+  const parentQ = db.prepare('SELECT group_id FROM forum_questions WHERE id = ?').get(req.params.id);
+  if (!parentQ) return res.status(404).json({ error: 'Question not found' });
+  if (!userCanAccessGroup(req.user, parentQ.group_id)) return res.status(403).json({ error: 'You do not have access to this question' });
   const result = db.prepare('INSERT INTO forum_replies (question_id, user_id, body) VALUES (?, ?, ?)').run(req.params.id, req.user.id, body);
   const newReply = db.prepare(`SELECT r.*, u.name as author_name, u.role as author_role FROM forum_replies r JOIN users u ON r.user_id = u.id WHERE r.id = ?`).get(result.lastInsertRowid);
   res.json(newReply);
@@ -392,6 +235,9 @@ app.post('/api/forum/question/:id/reply', requireAuth, (req, res) => {
 app.patch('/api/forum/question/:id/ai-status', requireAuth, requireRole('professor'), (req, res) => {
   const { status } = req.body;
   if (!['verified', 'rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  const targetQ = db.prepare('SELECT group_id FROM forum_questions WHERE id = ?').get(req.params.id);
+  if (!targetQ) return res.status(404).json({ error: 'Question not found' });
+  if (!userCanAccessGroup(req.user, targetQ.group_id)) return res.status(403).json({ error: 'You do not have access to this question' });
   db.prepare('UPDATE forum_questions SET ai_status = ? WHERE id = ?').run(status, req.params.id);
 
   // If verified, offer as approved answer
@@ -419,7 +265,7 @@ app.patch('/api/forum/question/:id/ai-status', requireAuth, requireRole('profess
 });
 
 // ─── OFFICE HOURS ROUTES ──────────────────────────────────────────────────────
-app.get('/api/groups/:groupId/requests', requireAuth, (req, res) => {
+app.get('/api/groups/:groupId/requests', requireAuth, requireGroupAccess('groupId'), (req, res) => {
   if (req.user.role === 'professor') {
     res.json(db.prepare(`SELECT r.*, u.name as student_name, u.email as student_email FROM office_hour_requests r JOIN users u ON r.student_id = u.id WHERE r.group_id = ? ORDER BY r.created_at DESC`).all(req.params.groupId));
   } else {
@@ -427,7 +273,7 @@ app.get('/api/groups/:groupId/requests', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/groups/:groupId/requests', requireAuth, requireRole('student'), (req, res) => {
+app.post('/api/groups/:groupId/requests', requireAuth, requireRole('student'), requireGroupAccess('groupId'), (req, res) => {
   const { subject, description, preferred_time } = req.body;
   if (!subject) return res.status(400).json({ error: 'Subject required' });
   const result = db.prepare('INSERT INTO office_hour_requests (group_id, student_id, subject, description, preferred_time) VALUES (?, ?, ?, ?, ?)').run(req.params.groupId, req.user.id, subject, description || '', preferred_time || '');
@@ -441,6 +287,9 @@ app.post('/api/groups/:groupId/requests', requireAuth, requireRole('student'), (
 app.patch('/api/requests/:id', requireAuth, requireRole('professor'), (req, res) => {
   const { status, scheduled_at } = req.body;
   if (!['approved', 'rejected', 'completed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  const reqRow = db.prepare('SELECT group_id FROM office_hour_requests WHERE id = ?').get(req.params.id);
+  if (!reqRow) return res.status(404).json({ error: 'Request not found' });
+  if (!userCanAccessGroup(req.user, reqRow.group_id)) return res.status(403).json({ error: 'You do not have access to this group' });
   db.prepare('UPDATE office_hour_requests SET status = ?, scheduled_at = COALESCE(?, scheduled_at) WHERE id = ?').run(status, scheduled_at ?? null, req.params.id);
   res.json({ success: true });
   // Notify student
@@ -504,7 +353,7 @@ app.get('/api/self-check/history', requireAuth, (req, res) => {
 // ─── WORKFLOW ROUTES ──────────────────────────────────────────────────────────
 
 // Get escalation queue for professor
-app.get('/api/workflow/queue/:groupId', requireAuth, requireRole('professor'), (req, res) => {
+app.get('/api/workflow/queue/:groupId', requireAuth, requireRole('professor'), requireGroupAccess('groupId'), (req, res) => {
   const items = db.prepare(`
     SELECT wi.*, fq.title, fq.body, fq.ai_answer, fq.ai_status, fq.confidence_score, fq.rag_sources,
            u.name as student_name, fq.created_at as question_created_at
@@ -518,7 +367,7 @@ app.get('/api/workflow/queue/:groupId', requireAuth, requireRole('professor'), (
 });
 
 // Get all workflow items (full history)
-app.get('/api/workflow/history/:groupId', requireAuth, requireRole('professor'), (req, res) => {
+app.get('/api/workflow/history/:groupId', requireAuth, requireRole('professor'), requireGroupAccess('groupId'), (req, res) => {
   const items = db.prepare(`
     SELECT wi.*, fq.title, fq.body, fq.ai_answer, fq.ai_status, fq.confidence_score,
            u.name as student_name
@@ -536,6 +385,7 @@ app.patch('/api/workflow/item/:id/resolve', requireAuth, requireRole('professor'
   const { action, ai_status } = req.body; // action: 'approve' | 'reject' | 'override'
   const item = db.prepare('SELECT * FROM workflow_items WHERE id = ?').get(req.params.id);
   if (!item) return res.status(404).json({ error: 'Item not found' });
+  if (!userCanAccessGroup(req.user, item.group_id)) return res.status(403).json({ error: 'You do not have access to this group' });
 
   db.prepare(`UPDATE workflow_items SET status = 'resolved', resolved_by = ?, resolved_at = datetime('now') WHERE id = ?`)
     .run(req.user.id, req.params.id);
@@ -557,7 +407,7 @@ app.patch('/api/workflow/item/:id/resolve', requireAuth, requireRole('professor'
 });
 
 // Get workflow analytics summary
-app.get('/api/workflow/summary/:groupId', requireAuth, (req, res) => {
+app.get('/api/workflow/summary/:groupId', requireAuth, requireGroupAccess('groupId'), (req, res) => {
   const gid = req.params.groupId;
   const cutoff7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -593,7 +443,7 @@ app.get('/api/workflow/summary/:groupId', requireAuth, (req, res) => {
 });
 
 // ─── CONFUSION CLUSTERS ───────────────────────────────────────────────────────
-app.get('/api/clusters/:groupId', requireAuth, (req, res) => {
+app.get('/api/clusters/:groupId', requireAuth, requireGroupAccess('groupId'), (req, res) => {
   const clusters = db.prepare("SELECT * FROM confusion_clusters WHERE group_id = ? ORDER BY question_count DESC").all(req.params.groupId);
   res.json(clusters);
 });
@@ -613,11 +463,11 @@ app.patch('/api/clusters/:clusterId/status', requireAuth, requireRole('professor
 });
 
 // ─── INTERVENTIONS ────────────────────────────────────────────────────────────
-app.get('/api/interventions/:groupId', requireAuth, (req, res) => {
+app.get('/api/interventions/:groupId', requireAuth, requireGroupAccess('groupId'), (req, res) => {
   res.json(db.prepare('SELECT * FROM interventions WHERE group_id = ? ORDER BY created_at DESC').all(req.params.groupId));
 });
 
-app.post('/api/interventions/:groupId', requireAuth, requireRole('professor'), async (req, res) => {
+app.post('/api/interventions/:groupId', requireAuth, requireRole('professor'), requireGroupAccess('groupId'), async (req, res) => {
   const { type, title, content, cluster_id, topic } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Title and content required' });
 
@@ -649,11 +499,11 @@ app.patch('/api/interventions/:id', requireAuth, requireRole('professor'), (req,
 });
 
 // ─── APPROVED ANSWERS ─────────────────────────────────────────────────────────
-app.get('/api/approved-answers/:groupId', requireAuth, (req, res) => {
+app.get('/api/approved-answers/:groupId', requireAuth, requireGroupAccess('groupId'), (req, res) => {
   res.json(db.prepare('SELECT aa.*, u.name as created_by_name FROM approved_answers aa JOIN users u ON aa.created_by = u.id WHERE aa.group_id = ? ORDER BY aa.usage_count DESC').all(req.params.groupId));
 });
 
-app.post('/api/approved-answers/:groupId', requireAuth, requireRole('professor'), (req, res) => {
+app.post('/api/approved-answers/:groupId', requireAuth, requireRole('professor'), requireGroupAccess('groupId'), (req, res) => {
   const { question_pattern, answer, topic, source_question_id } = req.body;
   if (!question_pattern || !answer) return res.status(400).json({ error: 'Pattern and answer required' });
   const result = db.prepare('INSERT INTO approved_answers (group_id, source_question_id, topic, question_pattern, answer, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(req.params.groupId, source_question_id || null, topic || null, question_pattern, answer, req.user.id);
@@ -661,7 +511,7 @@ app.post('/api/approved-answers/:groupId', requireAuth, requireRole('professor')
 });
 
 // ─── AI ANALYSIS ──────────────────────────────────────────────────────────────
-app.get('/api/ai/analysis/:groupId', requireAuth, async (req, res) => {
+app.get('/api/ai/analysis/:groupId', requireAuth, requireGroupAccess('groupId'), async (req, res) => {
   const questions = db.prepare('SELECT q.title, q.body, q.tags, q.created_at FROM forum_questions q WHERE q.group_id = ? ORDER BY q.created_at DESC LIMIT 50').all(req.params.groupId);
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'AI service not configured' });
   if (questions.length === 0) return res.json({ topics: [], insights: [], total_questions: 0 });
@@ -744,7 +594,7 @@ app.get('/api/admin/queue-health', requireAuth, requireRole('professor'), (req, 
 // ─── RAG / KNOWLEDGE BASE ─────────────────────────────────────────────────────
 
 // Upload document — professor only
-app.post('/api/knowledge/:groupId', requireAuth, requireRole('professor'), upload.single('file'), async (req, res) => {
+app.post('/api/knowledge/:groupId', requireAuth, requireRole('professor'), requireGroupAccess('groupId'), upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
   const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown'];
@@ -769,7 +619,7 @@ app.post('/api/knowledge/:groupId', requireAuth, requireRole('professor'), uploa
 });
 
 // List uploaded documents for a group (deduplicated by filename)
-app.get('/api/knowledge/:groupId', requireAuth, (req, res) => {
+app.get('/api/knowledge/:groupId', requireAuth, requireGroupAccess('groupId'), (req, res) => {
   const docs = db.prepare(`
     SELECT filename, COUNT(*) as chunks, MIN(created_at) as uploaded_at, MAX(id) as id
     FROM knowledge_documents
@@ -781,7 +631,7 @@ app.get('/api/knowledge/:groupId', requireAuth, (req, res) => {
 });
 
 // Delete all chunks for a document by filename
-app.delete('/api/knowledge/:groupId/:filename', requireAuth, requireRole('professor'), (req, res) => {
+app.delete('/api/knowledge/:groupId/:filename', requireAuth, requireRole('professor'), requireGroupAccess('groupId'), (req, res) => {
   const filename = decodeURIComponent(req.params.filename);
   const result = db.prepare('DELETE FROM knowledge_documents WHERE group_id = ? AND filename = ?').run(req.params.groupId, filename);
   res.json({ deleted: result.changes });
@@ -808,7 +658,27 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', ai_enabled: !!process.env.ANTHROPIC_API_KEY, db: 'connected', version: '2.1.0-rag' });
 });
 
-app.listen(PORT, () => {
-  console.log(`D.I.Y.A v2 backend running on http://localhost:${PORT}`);
-  console.log(`AI Workflow Engine: ${process.env.ANTHROPIC_API_KEY ? 'ENABLED' : 'DISABLED (set ANTHROPIC_API_KEY)'}`);
+// ─── Unknown API route → JSON 404 (instead of HTML) ──────────────────────────
+app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+
+// ─── Central error handler ───────────────────────────────────────────────────
+// Never leak stack traces / file paths to clients. Log server-side, return a
+// generic message. Multer file-size errors get a friendly 413.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'File too large (max 20 MB).' });
+  }
+  console.error('[error]', req.method, req.originalUrl, '—', err?.message);
+  res.status(err?.status || 500).json({ error: 'Something went wrong. Please try again.' });
 });
+
+// Only start listening when run directly (so tests can import the app).
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`D.I.Y.A v2 backend running on http://localhost:${PORT}`);
+    console.log(`AI Workflow Engine: ${process.env.ANTHROPIC_API_KEY ? 'ENABLED' : 'DISABLED (set ANTHROPIC_API_KEY)'}`);
+  });
+}
+
+module.exports = { app, db };

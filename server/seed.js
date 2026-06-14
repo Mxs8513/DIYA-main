@@ -1,13 +1,12 @@
 'use strict';
 require('dotenv').config();
 
-const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
-const path = require('path');
+const { createDb } = require('./db');
 
-const db = new Database(path.join(__dirname, 'diya.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// createDb applies the full schema + migrations, so seeding works on a fresh
+// clone even if the server has never been started.
+const db = createDb();
 
 // ── Guard: don't double-seed ──────────────────────────────────────────────────
 const existing = db.prepare("SELECT COUNT(*) as c FROM users WHERE email = 'dr.chen@university.edu'").get();
@@ -600,6 +599,26 @@ for (let i = 0; i < metricTypes.length; i++) {
 }
 
 console.log(`  ✓ Created ${metricTypes.length} AI metric records\n`);
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+const notif = (userId, type, title, message, link, daysOld) =>
+  db.prepare(`INSERT INTO notifications (user_id, type, title, message, link, read, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`).run(userId, type, title, message, link, 0, daysAgo(daysOld));
+
+// Professor sees incoming activity
+notif(profId, 'new_question', 'New question in your class',
+  `${students[2].name}: "How do I set up and use the ChemDraw virtual lab simulation?"`,
+  '/forum/' + encodeURIComponent('CHEM 1301 — General Chemistry'), 2);
+notif(profId, 'oh_request', 'New office hours request',
+  `${students[1].name} wants to meet — "Electron configuration exceptions for transition metals"`,
+  '/requests/' + encodeURIComponent('CHEM 1301 — General Chemistry'), 1);
+// Students see review + scheduling outcomes
+notif(students[0].id, 'verified', 'Your question got a verified answer!',
+  '"What is the difference between ionic and covalent bonds?"', `/groups/${groupId}/forum`, 11);
+notif(students[2].id, 'oh_approved', 'Office hours request approved!',
+  'Your request "Help with stoichiometry limiting reagent problems" has been approved.', '/office-hours', 4);
+
+console.log('  ✓ Created 4 notifications\n');
 
 // ── Summary ───────────────────────────────────────────────────────────────────
 console.log('─'.repeat(55));
