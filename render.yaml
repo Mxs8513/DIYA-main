@@ -1,0 +1,33 @@
+# Render Blueprint for the D.I.Y.A backend API.
+# Deploy: Render Dashboard → New → Blueprint → pick this repo. Render reads this
+# file and provisions the service. Set CORS_ORIGIN to your Vercel URL afterward.
+#
+# Defaults below are the RECRUITER-SAFE, KEYLESS configuration: no Anthropic key,
+# AI_ENABLED=false → the public link cannot spend any credits ($0). Seeded AI
+# workflow data and one-click demo logins still work.
+#
+# To enable live (capped) AI instead, add ANTHROPIC_API_KEY as a SECRET in the
+# dashboard and set AI_ENABLED=true — and set a hard spend cap in the Anthropic
+# Console. See DEPLOYMENT.md.
+services:
+  - type: web
+    name: diya-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    # Seeds the demo DB (idempotent) then starts the API.
+    startCommand: npm run deploy:start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true          # Render generates a strong random secret
+      - key: AI_ENABLED
+        value: "false"               # keyless demo → $0
+      - key: AI_PUBLIC_DEMO_MODE
+        value: "true"
+      - key: CORS_ORIGIN
+        sync: false                  # set to your Vercel URL after frontend deploy
+      # ANTHROPIC_API_KEY intentionally omitted for the public demo.

@@ -1,4 +1,7 @@
-const BASE = '/api';
+// In production (Vercel) the API lives on a different origin, so point at it via
+// VITE_API_BASE_URL (e.g. https://diya-api.onrender.com/api). Locally this is
+// unset and we use Vite's dev proxy at '/api'.
+const BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 function getToken() { return localStorage.getItem('diya_token'); }
 

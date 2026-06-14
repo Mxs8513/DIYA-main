@@ -2,6 +2,17 @@
 
 > An AI-powered academic workflow automation platform that routes student questions through an intelligent pipeline, surfaces confusion patterns, and enables professor-in-the-loop review — all backed by RAG-grounded answers from real course materials.
 
+## 🔗 Live Demo
+
+- **Live app:** _<!-- TODO: paste Vercel URL, e.g. https://diya-main.vercel.app -->_
+- **API health:** _<!-- TODO: paste Render URL + /api/health -->_
+- **Source:** https://github.com/Mxs8513/DIYA-main
+- **Walkthrough (Loom):** _<!-- TODO: optional Loom link -->_
+
+No signup needed — on the login page click **Enter as Professor** or **Enter as Student** to explore a seeded CHEM 1301 class.
+
+> **Demo mode:** the public demo runs with **live LLM calls disabled** to protect API usage — it costs **$0**. The full AI workflow is still visible through **seeded data** (AI-drafted answers, confidence scores, escalations, confusion clusters, interventions, observability metrics). Clone locally and add an `ANTHROPIC_API_KEY` (with `AI_ENABLED=true`) to see live generation — protected by built-in [spend + rate caps](#security-notes).
+
 ---
 
 ## What Is This?

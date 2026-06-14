@@ -25,6 +25,28 @@ If you *do* enable live AI on a public URL:
 
 ---
 
+## Quickstart — exact clicks (keyless public demo, $0)
+
+**1. Backend → Render** (≈3 min)
+1. [dashboard.render.com](https://dashboard.render.com) → **New +** → **Blueprint** → connect GitHub → pick `Mxs8513/DIYA-main`.
+2. Render reads `render.yaml` and shows a `diya-api` web service (free plan, root `server/`, build `npm install`, start `npm run deploy:start`). `JWT_SECRET` auto-generates; `AI_ENABLED=false`; **no** `ANTHROPIC_API_KEY`.
+3. Leave `CORS_ORIGIN` blank for now → **Apply**. Wait for "Live", then copy the URL, e.g. `https://diya-api.onrender.com`.
+4. Verify: open `https://diya-api.onrender.com/api/health` → `{"status":"ok","ai_enabled":false,"public_demo_mode":true,...}`.
+
+   _(Prefer not to use a Blueprint? New + → Web Service → repo → Root Dir `server`, Build `npm install`, Start `npm run deploy:start`, and add the env vars from the table below by hand.)_
+
+**2. Frontend → Vercel** (≈2 min)
+1. [vercel.com/new](https://vercel.com/new) → import `Mxs8513/DIYA-main`. Framework **Vite**, Build `npm run build`, Output `dist` (auto-detected; `vercel.json` confirms it).
+2. **Environment Variables** → add `VITE_API_BASE_URL` = `https://diya-api.onrender.com/api` (your Render URL **+ `/api`**).
+3. **Deploy**. Copy the URL, e.g. `https://diya-main.vercel.app`.
+
+**3. Close the CORS loop**
+1. Render → `diya-api` → **Environment** → set `CORS_ORIGIN` = your exact Vercel URL (e.g. `https://diya-main.vercel.app`, no trailing slash) → **Save** (auto-redeploys).
+
+**4. Smoke test** — open the Vercel URL → **Enter as Professor** → dashboard, Workflow Queue, Admin (the "Live AI Spend & Caps" panel shows `LIVE AI OFF`) → **Enter as Student** → forum + Self-Check (shows the calm "AI disabled" state). No Anthropic calls occur.
+
+---
+
 ## Backend (Node API)
 
 Recommended hosts: **Render**, **Railway**, or **Fly.io** (anything that runs a
