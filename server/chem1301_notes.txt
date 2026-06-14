@@ -1,0 +1,281 @@
+CHEM 1301 — General Chemistry I
+Course Notes: Key Concepts and Reference Material
+
+=== CHAPTER 1: ATOMIC STRUCTURE AND THE PERIODIC TABLE ===
+
+Atomic Structure:
+- Atoms consist of a nucleus (protons + neutrons) surrounded by electrons in orbitals.
+- Atomic number (Z) = number of protons. Mass number (A) = protons + neutrons.
+- Isotopes are atoms of the same element with different numbers of neutrons.
+- Electron configuration follows the Aufbau principle: fill lowest energy orbitals first.
+  Example: Sodium (Na, Z=11): 1s² 2s² 2p⁶ 3s¹
+
+Periodic Trends:
+- Atomic radius decreases left to right across a period (increasing nuclear charge pulls electrons closer).
+- Atomic radius increases top to bottom in a group (additional electron shells).
+- Ionization energy increases left to right; decreases top to bottom.
+- Electronegativity: Fluorine (4.0) is the most electronegative element.
+
+=== CHAPTER 2: CHEMICAL BONDING ===
+
+Ionic Bonds:
+- Form between metals and nonmetals through electron transfer.
+- The metal loses electrons (becomes cation, positive charge) and the nonmetal gains electrons (becomes anion, negative charge).
+- Example: NaCl — sodium gives one electron to chlorine.
+  Na → Na⁺ + e⁻  |  Cl + e⁻ → Cl⁻  |  Combined: Na⁺Cl⁻
+- Ionic compounds form crystal lattice structures with high melting points (NaCl melts at 801°C).
+- Ionic compounds conduct electricity when dissolved in water (electrolytes).
+
+Covalent Bonds:
+- Form between two nonmetals through electron sharing.
+- Single bond: one shared pair (e.g., H–H in H₂). Bond order = 1.
+- Double bond: two shared pairs (e.g., O=O in O₂). Bond order = 2.
+- Triple bond: three shared pairs (e.g., N≡N in N₂). Bond order = 3.
+- Polar covalent: unequal sharing when atoms have different electronegativities (e.g., H–Cl).
+- Nonpolar covalent: equal sharing (e.g., H–H, Cl–Cl).
+- Rule of thumb: ΔEN < 0.4 = nonpolar covalent; 0.4–1.7 = polar covalent; > 1.7 = ionic.
+
+VSEPR Theory (Molecular Geometry):
+- Electron pairs repel each other and adopt geometry that minimizes repulsion.
+- 2 bonding pairs, 0 lone pairs → linear (180°), e.g., CO₂
+- 3 bonding pairs, 0 lone pairs → trigonal planar (120°), e.g., BF₃
+- 4 bonding pairs, 0 lone pairs → tetrahedral (109.5°), e.g., CH₄
+- 4 pairs total, 1 lone pair → trigonal pyramidal (~107°), e.g., NH₃
+- 4 pairs total, 2 lone pairs → bent (~104.5°), e.g., H₂O
+
+=== CHAPTER 3: STOICHIOMETRY AND MOLAR MASS ===
+
+The Mole Concept:
+- 1 mole = 6.022 × 10²³ particles (Avogadro's number).
+- Molar mass (g/mol) = mass in grams of one mole of a substance.
+- Molar mass = sum of atomic masses of all atoms in formula.
+
+Calculating Molar Mass — Examples:
+- H₂O: (2 × 1.008) + 16.00 = 18.016 g/mol
+- NaCl: 22.990 + 35.453 = 58.443 g/mol
+- H₂SO₄: (2 × 1.008) + 32.06 + (4 × 16.00) = 98.076 g/mol
+- C₆H₁₂O₆ (glucose): (6 × 12.011) + (12 × 1.008) + (6 × 16.00) = 180.156 g/mol
+
+Mole Conversions:
+- moles = mass (g) ÷ molar mass (g/mol)
+- mass (g) = moles × molar mass (g/mol)
+- particles = moles × 6.022 × 10²³
+
+Percent Composition:
+- % element = (mass of element in 1 mol / molar mass of compound) × 100
+
+Empirical and Molecular Formulas:
+- Empirical formula: simplest whole-number ratio of atoms.
+- Molecular formula: actual number of atoms (multiple of empirical formula).
+- To find empirical formula from % composition: convert % to grams, then to moles, then find smallest ratio.
+
+=== CHAPTER 4: BALANCING CHEMICAL EQUATIONS ===
+
+Rules for Balancing:
+1. Write the unbalanced equation with correct formulas.
+2. Count atoms of each element on both sides.
+3. Add coefficients (not subscripts) to balance.
+4. Always balance by inspection or trial/error; never change subscripts.
+5. Check: total atoms of each element must be equal on both sides.
+
+Common Examples:
+- Combustion of methane: CH₄ + 2O₂ → CO₂ + 2H₂O
+- Formation of water: 2H₂ + O₂ → 2H₂O
+- Decomposition of hydrogen peroxide: 2H₂O₂ → 2H₂O + O₂
+- Synthesis of ammonia: N₂ + 3H₂ → 2NH₃
+- Iron rusting: 4Fe + 3O₂ → 2Fe₂O₃
+- Neutralization: HCl + NaOH → NaCl + H₂O
+
+Limiting Reagents:
+- The limiting reagent is the reactant that runs out first, stopping the reaction.
+- Excess reagent: the reactant left over after the reaction.
+- To find limiting reagent: convert each reactant to moles of product. The reactant that gives FEWER moles of product is the limiting reagent.
+- Theoretical yield: maximum amount of product possible from the limiting reagent.
+- Percent yield = (actual yield / theoretical yield) × 100%
+
+Example: React 5.0 g H₂ with 32.0 g O₂ to form H₂O (2H₂ + O₂ → 2H₂O)
+- Moles H₂ = 5.0 / 2.016 = 2.48 mol → can make 2.48 mol H₂O
+- Moles O₂ = 32.0 / 32.00 = 1.00 mol → can make 2 × 1.00 = 2.00 mol H₂O
+- O₂ gives fewer moles of product → O₂ is the limiting reagent
+- Theoretical yield of H₂O = 2.00 mol × 18.016 g/mol = 36.0 g
+
+=== CHAPTER 5: SOLUTIONS AND CONCENTRATION ===
+
+Molarity (M):
+- Molarity = moles of solute / liters of solution
+- M = n / V(L)
+- To prepare a solution: weigh out n = M × V grams of solute, dissolve in less than the final volume of solvent, then dilute to final volume.
+
+Dilution:
+- M₁V₁ = M₂V₂ (moles of solute stay constant)
+- Example: dilute 25.0 mL of 6.0 M HCl to make 150.0 mL solution.
+  M₂ = (6.0 × 25.0) / 150.0 = 1.0 M
+
+Other Concentration Units:
+- Molality (m) = moles solute / kg solvent (used for colligative properties)
+- Mole fraction (χ) = moles component / total moles all components
+- Weight percent = (mass solute / mass solution) × 100%
+
+Solubility Rules (memorize these):
+- All Group 1 (alkali metal) salts are soluble.
+- All nitrate (NO₃⁻) and acetate (CH₃COO⁻) salts are soluble.
+- All chlorides (Cl⁻) are soluble EXCEPT AgCl, PbCl₂, Hg₂Cl₂.
+- All sulfates (SO₄²⁻) are soluble EXCEPT BaSO₄, PbSO₄, CaSO₄.
+- All carbonates (CO₃²⁻) are insoluble EXCEPT Group 1 and NH₄⁺.
+- All hydroxides (OH⁻) are insoluble EXCEPT Group 1, Ba(OH)₂, Sr(OH)₂.
+
+=== CHAPTER 6: ACIDS, BASES, AND pH ===
+
+Definitions:
+- Arrhenius: acid produces H⁺ in water; base produces OH⁻ in water.
+- Brønsted-Lowry: acid donates H⁺ (proton donor); base accepts H⁺ (proton acceptor).
+- Lewis: acid accepts electron pair; base donates electron pair.
+
+Strong Acids (memorize — fully dissociate in water):
+HCl, HBr, HI, HNO₃, H₂SO₄, HClO₄
+
+Strong Bases (memorize):
+NaOH, KOH, LiOH, Ca(OH)₂, Ba(OH)₂, Sr(OH)₂
+
+pH Scale:
+- pH = -log[H⁺] (concentration in mol/L)
+- pH < 7: acidic | pH = 7: neutral | pH > 7: basic
+- pOH = -log[OH⁻]
+- pH + pOH = 14 (at 25°C)
+- Kw = [H⁺][OH⁻] = 1.0 × 10⁻¹⁴ at 25°C
+
+Titration:
+- Used to determine the concentration of an unknown acid or base.
+- At the equivalence point: moles acid = moles base (for monoprotic).
+- Equation: MₐVₐ = M_bV_b (for monoprotic acid + monoprotic base)
+- Indicator: changes color near the equivalence point (e.g., phenolphthalein turns pink at ~pH 8.2–10).
+- Titration curve: shows pH vs. volume of titrant added.
+
+Example: 25.00 mL of HCl titrated with 0.1500 M NaOH, equivalence at 32.50 mL.
+- moles NaOH = 0.03250 L × 0.1500 mol/L = 0.004875 mol
+- moles HCl = moles NaOH = 0.004875 mol (1:1 ratio)
+- [HCl] = 0.004875 mol / 0.02500 L = 0.1950 M
+
+=== CHAPTER 7: THERMOCHEMISTRY ===
+
+Key Terms:
+- System: the part of the universe we study (e.g., the reaction).
+- Surroundings: everything else.
+- Exothermic reaction: releases heat to surroundings; ΔH < 0 (negative).
+- Endothermic reaction: absorbs heat from surroundings; ΔH > 0 (positive).
+
+Enthalpy (H):
+- ΔH = H_products − H_reactants
+- ΔH is a state function (independent of path).
+- Hess's Law: if a reaction can be expressed as sum of other reactions, its ΔH = sum of their ΔH values.
+
+Standard Enthalpy of Formation (ΔHf°):
+- ΔH°rxn = Σ ΔHf°(products) − Σ ΔHf°(reactants)
+- ΔHf° of any pure element in its standard state = 0.
+
+Specific Heat Capacity:
+- q = mcΔT
+  where q = heat (J), m = mass (g), c = specific heat (J/g·°C), ΔT = temperature change (°C)
+- Specific heat of water = 4.184 J/g·°C
+- Specific heat of ice = 2.09 J/g·°C; steam = 2.01 J/g·°C
+
+Calorimetry:
+- q_system = −q_surroundings (conservation of energy)
+- Coffee-cup calorimeter: constant pressure, measures ΔH directly.
+- Bomb calorimeter: constant volume, measures ΔE; ΔH ≈ ΔE for reactions with no Δn_gas.
+
+=== CHAPTER 8: CHEMICAL EQUILIBRIUM ===
+
+Equilibrium Constant (K):
+- For aA + bB ⇌ cC + dD
+  Kc = [C]^c[D]^d / [A]^a[B]^b
+- Only aqueous (aq) and gaseous (g) species appear in K expression.
+- Pure solids and pure liquids are omitted (activity = 1).
+
+Interpreting K values:
+- K >> 1: equilibrium lies to the right (mostly products).
+- K << 1: equilibrium lies to the left (mostly reactants).
+- K ≈ 1: significant amounts of both reactants and products at equilibrium.
+
+Le Chatelier's Principle:
+- If stress is applied to a system at equilibrium, the system shifts to relieve that stress.
+- Adding reactant → shifts right (more products form).
+- Adding product → shifts left (more reactants form).
+- Removing a component → shifts toward that component.
+- Increasing pressure (for gas-phase reactions) → shifts toward side with fewer moles of gas.
+- Increasing temperature for endothermic reaction → shifts right (K increases).
+- Increasing temperature for exothermic reaction → shifts left (K decreases).
+- Adding catalyst → does NOT shift equilibrium; only speeds up reaching equilibrium.
+
+Reaction Quotient (Q):
+- Same expression as K but uses current (non-equilibrium) concentrations.
+- If Q < K: reaction proceeds forward (toward products).
+- If Q > K: reaction proceeds reverse (toward reactants).
+- If Q = K: system is at equilibrium.
+
+=== CHAPTER 9: GASES AND THE IDEAL GAS LAW ===
+
+Ideal Gas Law:
+- PV = nRT
+  P = pressure (atm), V = volume (L), n = moles, R = 0.08206 L·atm/mol·K, T = temperature (K)
+- Note: T must ALWAYS be in Kelvin. K = °C + 273.15
+
+Gas Laws (special cases of PV=nRT):
+- Boyle's Law: P₁V₁ = P₂V₂ (constant T and n)
+- Charles's Law: V₁/T₁ = V₂/T₂ (constant P and n)
+- Gay-Lussac's Law: P₁/T₁ = P₂/T₂ (constant V and n)
+- Combined Gas Law: P₁V₁/T₁ = P₂V₂/T₂
+
+Standard Temperature and Pressure (STP):
+- T = 273.15 K (0°C), P = 1 atm
+- 1 mole of ideal gas at STP occupies 22.414 L (molar volume)
+
+Dalton's Law of Partial Pressures:
+- P_total = P_A + P_B + P_C + ...
+- Each gas exerts pressure independently.
+- P_A = χ_A × P_total (where χ is mole fraction)
+
+Real vs. Ideal Gases:
+- Ideal gas: particles have no volume and no intermolecular forces.
+- Real gases deviate at high pressure and low temperature.
+- Van der Waals equation: (P + an²/V²)(V − nb) = nRT
+  where a corrects for intermolecular attractions and b corrects for molecular volume.
+
+=== SIGNIFICANT FIGURES ===
+
+Rules:
+1. All non-zero digits are significant.
+2. Zeros between non-zero digits are significant (e.g., 1002 has 4 sig figs).
+3. Leading zeros are NOT significant (e.g., 0.0052 has 2 sig figs).
+4. Trailing zeros after decimal point ARE significant (e.g., 1.500 has 4 sig figs).
+5. Trailing zeros without decimal point are ambiguous (use scientific notation to be clear).
+
+Operations:
+- Multiplication/division: answer has same sig figs as value with fewest sig figs.
+- Addition/subtraction: answer has same decimal places as value with fewest decimal places.
+
+=== EXAM TOPICS AND COMMON MISCONCEPTIONS ===
+
+Common mistakes to avoid:
+1. Forgetting to convert Celsius to Kelvin in gas law problems.
+2. Using mass instead of moles in equilibrium expressions.
+3. Including solids/liquids in the K expression.
+4. Confusing molarity (mol/L solution) with molality (mol/kg solvent).
+5. Adding subscripts instead of coefficients when balancing equations.
+6. Forgetting that ΔHf° of elements in standard state = 0.
+7. Confusing limiting reagent (based on moles of product) with the reactant present in smaller amount.
+
+Midterm Coverage (Chapters 1–5):
+- Atomic structure and electron configurations
+- Chemical bonding (ionic, covalent, VSEPR)
+- Molar mass calculations and mole conversions
+- Balancing equations and stoichiometry
+- Limiting reagents and percent yield
+- Solution concentration (molarity, dilution)
+
+Final Exam Coverage (Chapters 1–9, cumulative):
+- All midterm material
+- Acids and bases, pH, titration
+- Thermochemistry (ΔH, Hess's law, specific heat)
+- Chemical equilibrium (K, Le Chatelier's, Q)
+- Ideal gas law and gas stoichiometry
