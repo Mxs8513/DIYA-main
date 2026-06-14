@@ -31,6 +31,25 @@ export function LoginPage() {
     if (e.key === "Enter") handleLogin();
   };
 
+  // One-click demo access — logs in with the seeded accounts so a recruiter can
+  // explore instantly without knowing any credentials.
+  const demoLogin = async (role: "professor" | "student") => {
+    const creds = role === "professor"
+      ? { email: "dr.chen@university.edu", password: "demo1234" }
+      : { email: "alex.r@uni.edu", password: "demo1234" };
+    setError("");
+    setLoading(true);
+    try {
+      const { token, user } = await api.auth.login(creds.email, creds.password);
+      saveAuth(token, user);
+      navigate(user.role === "professor" ? "/professor" : "/groups");
+    } catch {
+      setError("Demo account unavailable. The server may still be starting — try again in a moment.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -62,7 +81,23 @@ export function LoginPage() {
           Log in or{" "}
           <Link to="/signup" style={{ color: "#4285F4", textDecoration: "underline" }}>sign up</Link>
         </h2>
-        <p style={{ fontSize: 14, color: "#666", margin: "0 0 24px" }}>Enter your credentials to continue</p>
+        <p style={{ fontSize: 14, color: "#666", margin: "0 0 16px" }}>Enter your credentials to continue</p>
+
+        {/* One-click demo access for reviewers — no account needed */}
+        <div style={{ border: "1.5px solid rgba(162,34,55,0.25)", backgroundColor: "rgba(162,34,55,0.04)", borderRadius: 12, padding: "12px 14px", marginBottom: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: "#a22237", marginBottom: 8 }}>👋 Reviewing this project? Try the live demo</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" onClick={() => demoLogin("professor")} disabled={loading}
+              style={{ flex: 1, padding: "10px 8px", borderRadius: 8, border: "none", background: "linear-gradient(135deg, #a22237, #5C1E26)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading ? "wait" : "pointer" }}>
+              Enter as Professor
+            </button>
+            <button type="button" onClick={() => demoLogin("student")} disabled={loading}
+              style={{ flex: 1, padding: "10px 8px", borderRadius: 8, border: "1.5px solid #a22237", background: "#fff", color: "#a22237", fontSize: 13, fontWeight: 700, cursor: loading ? "wait" : "pointer" }}>
+              Enter as Student
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "#999", marginTop: 8, textAlign: "center" }}>Loads a seeded CHEM 1301 class — no signup required</div>
+        </div>
 
         {error && (
           <div style={{ padding: "10px 14px", backgroundColor: "#fff0f2", border: "1px solid #f9a8b4", borderRadius: 8, fontSize: 13, color: "#a22237", marginBottom: 16 }}>

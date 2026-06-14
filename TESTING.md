@@ -43,6 +43,22 @@ Exercises the AI workflow helpers in **AI-disabled** mode against an in-memory D
 - `detectAndUpdateClusters` aggregation + severity thresholds,
 - `routeQuestion` escalation path when no AI answer is available.
 
+### Backend unit tests — `server/test/ai-guard.test.js`
+The AI cost-control guard (caps that protect Anthropic credits):
+- AI disabled (`AI_ENABLED=false`) is never allowed → no Anthropic call,
+- missing API key is never allowed,
+- daily budget exceeded blocks the call,
+- monthly budget exceeded blocks the call,
+- per-user daily cap blocks (and only that user),
+- per-IP daily cap blocks,
+- per-route Self-Check cap blocks independently,
+- `recordAIUsage` writes a ledger row, `estimateCostUsd` uses env pricing,
+- `getAIUsageSummary` aggregates today/month spend, blocked count, remaining budget.
+
+Plus integration coverage in `api.test.js`: Self-Check returns a graceful block
+(no crash) when AI is disabled, and `/api/admin/ai-usage` returns the budget/cap
+summary with the recorded blocked event.
+
 ### Backend unit tests — `server/test/rag.test.js`
 - `chunkText` overlapping-window chunking + short-input rejection,
 - `cosineSimilarity` identical / orthogonal / partial alignment.

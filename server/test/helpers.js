@@ -9,8 +9,13 @@ const fs = require('fs');
 const tmpDb = path.join(os.tmpdir(), `diya-test-${process.pid}-${Date.now()}.db`);
 process.env.DB_PATH = tmpDb;
 process.env.JWT_SECRET = 'test-secret';
-delete process.env.ANTHROPIC_API_KEY; // force AI-disabled, deterministic behavior
-delete process.env.NODE_ENV;
+process.env.NODE_ENV = 'test';        // disables rate limiting so we can hammer endpoints
+// Force AI OFF deterministically. We SET (not delete) these because requiring
+// server.js runs dotenv against the real server/.env — and dotenv will not
+// override values that already exist in process.env. So a dev machine whose
+// .env has a key + AI_ENABLED=true still runs tests with AI disabled.
+process.env.ANTHROPIC_API_KEY = '';
+process.env.AI_ENABLED = 'false';
 
 const { app } = require('../server');
 

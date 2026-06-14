@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { ProfessorSidebar } from "./ProfessorSidebar";
 import { api } from "../../lib/api";
-import type { AdminMetrics, QueueHealth } from "../../lib/api";
+import type { AdminMetrics, QueueHealth, AIUsageSummary } from "../../lib/api";
 
 const p = { crimson: "#a22237", sage: "#7A9B76" } as const;
 
@@ -92,6 +92,7 @@ export function AdminPage() {
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [health, setHealth] = useState<QueueHealth | null>(null);
   const [serverHealth, setServerHealth] = useState<{ status: string; ai_enabled: boolean; version: string } | null>(null);
+  const [aiUsage, setAiUsage] = useState<AIUsageSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -99,14 +100,16 @@ export function AdminPage() {
 
   async function loadData() {
     setLoading(true);
-    const [m, h, s] = await Promise.all([
+    const [m, h, s, u] = await Promise.all([
       api.admin.metrics().catch(() => null),
       api.admin.queueHealth().catch(() => null),
       api.health().catch(() => null),
+      api.admin.aiUsage().catch(() => null),
     ]);
     setMetrics(m);
     setHealth(h);
     setServerHealth(s);
+    setAiUsage(u);
     setLastUpdated(new Date());
     setLoading(false);
   }
@@ -158,6 +161,34 @@ export function AdminPage() {
                     <HealthAlert icon="🟡" label="AI answers pending professor review" value={health.pendingReview} />
                     <HealthAlert icon="📝" label="Draft interventions not yet sent" value={health.draftInterventions} />
                   </div>
+                </div>
+              )}
+
+              {/* Live AI spend & caps (cost controls) */}
+              {aiUsage && (
+                <div style={{ backgroundColor: "#fff", borderRadius: 14, padding: "22px 26px", border: "1px solid rgba(0,0,0,0.07)", marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "#111" }}>Live AI Spend &amp; Caps</div>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, color: aiUsage.aiEnabled ? p.sage : "#888", backgroundColor: aiUsage.aiEnabled ? "rgba(122,155,118,0.12)" : "rgba(0,0,0,0.05)" }}>
+                      {aiUsage.aiEnabled ? "LIVE AI ON" : "LIVE AI OFF"}
+                    </span>
+                    {aiUsage.publicDemoMode && <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, color: "#b45309", backgroundColor: "rgba(245,158,11,0.12)" }}>PUBLIC DEMO MODE</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>Defense-in-depth budget + rate caps. Estimated from token usage.</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 14 }}>
+                    <MetricTile label="Spend Today" value={`$${aiUsage.todaySpendUsd.toFixed(4)}`} sub={`of $${aiUsage.dailyBudgetUsd.toFixed(2)} budget`} accent={p.crimson} />
+                    <MetricTile label="Remaining Today" value={`$${aiUsage.remainingDailyUsd.toFixed(4)}`} accent={p.sage} />
+                    <MetricTile label="Spend This Month" value={`$${aiUsage.monthlySpendUsd.toFixed(4)}`} sub={`of $${aiUsage.monthlyBudgetUsd.toFixed(2)} budget`} />
+                    <MetricTile label="AI Calls Today" value={aiUsage.todayCalls} />
+                    <MetricTile label="Blocked Today" value={aiUsage.blockedToday} accent={aiUsage.blockedToday > 0 ? "#dc2626" : "#111"} sub="hit a cap" />
+                  </div>
+                  {aiUsage.dailyBudgetUsd > 0 && (
+                    <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 11, color: "#888", width: 110 }}>Daily budget used</span>
+                      <MiniBar pct={(aiUsage.todaySpendUsd / aiUsage.dailyBudgetUsd) * 100} color={p.crimson} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#111", width: 40, textAlign: "right" }}>{Math.round((aiUsage.todaySpendUsd / aiUsage.dailyBudgetUsd) * 100)}%</span>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -202,6 +202,25 @@ const SCHEMA = `
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (group_id) REFERENCES groups(id)
   );
+
+  -- ── AI usage / spend ledger (powers budget + rate caps) ───────────────────
+  -- Every attempted LLM call writes a row here: successful calls carry token
+  -- counts + estimated cost; blocked calls carry success=0 + a blocked_reason.
+  -- Daily/monthly spend and per-user/per-IP call counts are computed from this.
+  CREATE TABLE IF NOT EXISTS ai_usage_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    ip_address TEXT,
+    route TEXT,
+    request_type TEXT,
+    model TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    estimated_cost_usd REAL DEFAULT 0,
+    success INTEGER DEFAULT 1,
+    blocked_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `;
 
 // Columns added after the original schema shipped. Wrapped individually so a

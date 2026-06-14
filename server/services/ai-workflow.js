@@ -5,13 +5,59 @@
  */
 
 const Anthropic = require('@anthropic-ai/sdk');
+const guard = require('./ai-guard');
+
+const MODEL = 'claude-haiku-4-5-20251001';
 
 let anthropic = null;
 let db = null;
 
 function init(database, apiKey) {
   db = database;
-  if (apiKey) anthropic = new Anthropic({ apiKey });
+  // Only construct the client when AI is BOTH enabled and keyed. This is the
+  // first gate: if AI_ENABLED!=='true' or no key, `anthropic` stays null and we
+  // never reach the network.
+  const enabled = process.env.AI_ENABLED === 'true';
+  anthropic = (apiKey && enabled) ? new Anthropic({ apiKey }) : null;
+}
+
+/**
+ * Single choke point for every Anthropic call.
+ * - Checks the guard (budget + per-user/IP + route caps) BEFORE calling.
+ * - On block: records a success=0 usage event and returns { blocked, message:null }.
+ * - On success: records token usage + estimated cost, logs a metric.
+ * Callers use a deterministic fallback whenever `message` is null.
+ *
+ * @param {object} ctx { userId, ip }
+ * @param {string} requestType e.g. 'classifyTopic'
+ * @param {string} route e.g. '/forum'
+ * @param {() => Promise<any>} doCall returns the Anthropic message
+ */
+async function guardedCall(ctx, requestType, route, doCall) {
+  if (!anthropic) return { blocked: true, reason: 'ai_disabled', message: null };
+  const userId = ctx?.userId ?? null;
+  const ip = ctx?.ip ?? null;
+
+  const decision = guard.canUseAI({ db, userId, ip, route, requestType });
+  if (!decision.allowed) {
+    guard.recordAIUsage({ db, userId, ip, route, requestType, model: MODEL, success: false, blockedReason: decision.reason });
+    return { blocked: true, reason: decision.reason, message: null };
+  }
+
+  const start = Date.now();
+  try {
+    const message = await doCall();
+    const inputTokens = message.usage?.input_tokens || 0;
+    const outputTokens = message.usage?.output_tokens || 0;
+    const estimatedCostUsd = guard.estimateCostUsd({ inputTokens, outputTokens });
+    guard.recordAIUsage({ db, userId, ip, route, requestType, model: MODEL, inputTokens, outputTokens, estimatedCostUsd, success: true });
+    logMetric(requestType, MODEL, Date.now() - start, true, null, inputTokens + outputTokens);
+    return { blocked: false, message };
+  } catch (err) {
+    guard.recordAIUsage({ db, userId, ip, route, requestType, model: MODEL, success: false, blockedReason: 'api_error' });
+    logMetric(requestType, MODEL, Date.now() - start, false, err.message, 0);
+    return { blocked: false, message: null, error: err };
+  }
 }
 
 // ─── Text Similarity (Jaccard on tokens, no embedding needed) ────────────────
@@ -78,102 +124,81 @@ const TOPIC_CATEGORIES = [
   'Syntax & Language', 'Memory & Performance', 'Other'
 ];
 
-async function classifyTopic(questionText) {
-  if (!anthropic) {
-    const lower = questionText.toLowerCase();
-    if (lower.includes('recurs') || lower.includes('loop') || lower.includes('iterati')) return 'Recursion & Iteration';
-    if (lower.includes('array') || lower.includes('list') || lower.includes('tree') || lower.includes('stack') || lower.includes('queue')) return 'Data Structures';
-    if (lower.includes('sort') || lower.includes('search') || lower.includes('complex') || lower.includes('big o')) return 'Algorithms';
-    if (lower.includes('class') || lower.includes('object') || lower.includes('inherit') || lower.includes('polymor')) return 'Object-Oriented Programming';
-    if (lower.includes('debug') || lower.includes('test') || lower.includes('error') || lower.includes('bug')) return 'Debugging & Testing';
-    if (lower.includes('project') || lower.includes('assignment') || lower.includes('homework') || lower.includes('submit')) return 'Projects & Assignments';
-    if (lower.includes('exam') || lower.includes('midterm') || lower.includes('final') || lower.includes('quiz')) return 'Exam Preparation';
-    if (lower.includes('install') || lower.includes('setup') || lower.includes('environment') || lower.includes('ide')) return 'Development Environment';
-    return 'Other';
-  }
+function classifyTopicFallback(questionText) {
+  const lower = questionText.toLowerCase();
+  if (lower.includes('recurs') || lower.includes('loop') || lower.includes('iterati')) return 'Recursion & Iteration';
+  if (lower.includes('array') || lower.includes('list') || lower.includes('tree') || lower.includes('stack') || lower.includes('queue')) return 'Data Structures';
+  if (lower.includes('sort') || lower.includes('search') || lower.includes('complex') || lower.includes('big o')) return 'Algorithms';
+  if (lower.includes('class') || lower.includes('object') || lower.includes('inherit') || lower.includes('polymor')) return 'Object-Oriented Programming';
+  if (lower.includes('debug') || lower.includes('test') || lower.includes('error') || lower.includes('bug')) return 'Debugging & Testing';
+  if (lower.includes('project') || lower.includes('assignment') || lower.includes('homework') || lower.includes('submit')) return 'Projects & Assignments';
+  if (lower.includes('exam') || lower.includes('midterm') || lower.includes('final') || lower.includes('quiz')) return 'Exam Preparation';
+  if (lower.includes('install') || lower.includes('setup') || lower.includes('environment') || lower.includes('ide')) return 'Development Environment';
+  return 'Other';
+}
 
-  try {
-    const start = Date.now();
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 60,
-      messages: [{
-        role: 'user',
-        content: `Classify this academic question into exactly one of these categories. Return only the category name, nothing else.
+async function classifyTopic(questionText, ctx = {}) {
+  const res = await guardedCall(ctx, 'classifyTopic', '/forum', () => anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 60,
+    messages: [{
+      role: 'user',
+      content: `Classify this academic question into exactly one of these categories. Return only the category name, nothing else.
 
 Categories: ${TOPIC_CATEGORIES.join(', ')}
 
 Question: "${questionText.slice(0, 400)}"`,
-      }],
-    });
-    logMetric('classifyTopic', 'claude-haiku-4-5-20251001', Date.now() - start, true, null, message.usage?.input_tokens + message.usage?.output_tokens);
-    const result = message.content[0].text.trim();
-    return TOPIC_CATEGORIES.includes(result) ? result : 'Other';
-  } catch (err) {
-    logMetric('classifyTopic', 'claude-haiku-4-5-20251001', 0, false, err.message, 0);
-    return 'Other';
-  }
+    }],
+  }));
+  if (!res.message) return classifyTopicFallback(questionText); // AI off / blocked / error
+  const result = res.message.content[0].text.trim();
+  return TOPIC_CATEGORIES.includes(result) ? result : 'Other';
 }
 
 // ─── generateAnswerDraft ─────────────────────────────────────────────────────
-async function generateAnswerDraft(title, body, topic, ragChunks = []) {
-  if (!anthropic) return null;
-
+async function generateAnswerDraft(title, body, topic, ragChunks = [], ctx = {}) {
   const hasRAG = ragChunks && ragChunks.length > 0;
   const ragSection = hasRAG
     ? `\n\nRELEVANT COURSE MATERIALS (retrieved from uploaded documents):\n${ragChunks.map((c, i) => `[${i + 1}] (from "${c.filename}"): ${c.text.slice(0, 600)}`).join('\n\n')}\n\nUse the above course materials to ground your answer. Cite the source file name when referencing them.`
     : '';
 
-  try {
-    const start = Date.now();
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 700,
-      messages: [{
-        role: 'user',
-        content: `You are an academic assistant helping students in a ${topic || 'computer science'} course.
+  const res = await guardedCall(ctx, 'generateAnswerDraft', '/forum', () => anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 700,
+    messages: [{
+      role: 'user',
+      content: `You are an academic assistant helping students in a ${topic || 'computer science'} course.
 Answer this student question clearly and educationally. Be concise (2-4 paragraphs).${ragSection}
 
 Question: ${title}
 ${body || ''}`,
-      }],
-    });
-    logMetric('generateAnswerDraft', 'claude-haiku-4-5-20251001', Date.now() - start, true, null, message.usage?.input_tokens + message.usage?.output_tokens);
-    return message.content[0].text;
-  } catch (err) {
-    logMetric('generateAnswerDraft', 'claude-haiku-4-5-20251001', 0, false, err.message, 0);
-    return null;
-  }
+    }],
+  }));
+  return res.message ? res.message.content[0].text : null; // null → escalate to professor
 }
 
 // ─── scoreAIConfidence ───────────────────────────────────────────────────────
-async function scoreAIConfidence(question, answer) {
-  if (!anthropic || !answer) return 0.7;
-  try {
-    const start = Date.now();
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 80,
-      messages: [{
-        role: 'user',
-        content: `Rate the confidence of this AI-generated answer on a scale of 0.0 to 1.0.
+async function scoreAIConfidence(question, answer, ctx = {}) {
+  if (!answer) return 0.7;
+  const res = await guardedCall(ctx, 'scoreAIConfidence', '/forum', () => anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 80,
+    messages: [{
+      role: 'user',
+      content: `Rate the confidence of this AI-generated answer on a scale of 0.0 to 1.0.
 Consider: accuracy, completeness, clarity, and whether the question is well-defined.
 Return only JSON: {"confidence": 0.85, "reason": "brief reason"}
 
 Question: "${question.slice(0, 300)}"
 Answer: "${answer.slice(0, 500)}"`,
-      }],
-    });
-    logMetric('scoreAIConfidence', 'claude-haiku-4-5-20251001', Date.now() - start, true, null, message.usage?.input_tokens + message.usage?.output_tokens);
-    try {
-      const text = message.content[0].text.trim();
-      const json = JSON.parse(text.startsWith('{') ? text : text.slice(text.indexOf('{')));
-      return Math.min(1, Math.max(0, json.confidence || 0.7));
-    } catch {
-      return 0.7;
-    }
-  } catch (err) {
-    logMetric('scoreAIConfidence', 'claude-haiku-4-5-20251001', 0, false, err.message, 0);
+    }],
+  }));
+  if (!res.message) return 0.7; // AI off / blocked / error → neutral confidence
+  try {
+    const text = res.message.content[0].text.trim();
+    const json = JSON.parse(text.startsWith('{') ? text : text.slice(text.indexOf('{')));
+    return Math.min(1, Math.max(0, json.confidence || 0.7));
+  } catch {
     return 0.7;
   }
 }
@@ -208,24 +233,20 @@ async function detectAndUpdateClusters(groupId) {
 }
 
 // ─── recommendIntervention ───────────────────────────────────────────────────
-async function recommendIntervention(cluster) {
-  if (!anthropic) {
-    return {
-      type: 'review_session',
-      title: `Review Session: ${cluster.topic}`,
-      content: `Consider hosting a 45-minute review session focused on ${cluster.topic}. ${cluster.question_count} students have asked related questions in the past week.`,
-      urgency: cluster.severity,
-    };
-  }
+async function recommendIntervention(cluster, ctx = {}) {
+  const fallback = {
+    type: 'review_session',
+    title: `Review Session: ${cluster.topic}`,
+    content: `Consider hosting a 45-minute review session focused on ${cluster.topic}. ${cluster.question_count} students have asked related questions in the past week.`,
+    urgency: cluster.severity,
+  };
 
-  try {
-    const start = Date.now();
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
-      messages: [{
-        role: 'user',
-        content: `You are helping a professor manage a class where ${cluster.question_count} students are confused about "${cluster.topic}" (severity: ${cluster.severity}).
+  const res = await guardedCall(ctx, 'recommendIntervention', '/interventions', () => anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 400,
+    messages: [{
+      role: 'user',
+      content: `You are helping a professor manage a class where ${cluster.question_count} students are confused about "${cluster.topic}" (severity: ${cluster.severity}).
 
 Suggest an intervention. Return JSON only:
 {
@@ -234,89 +255,69 @@ Suggest an intervention. Return JSON only:
   "content": "2-3 sentence explanation and recommended action for the professor",
   "urgency": "low|medium|high|critical"
 }`,
-      }],
-    });
-    logMetric('recommendIntervention', 'claude-haiku-4-5-20251001', Date.now() - start, true, null, 0);
-    const text = message.content[0].text.trim();
+    }],
+  }));
+  if (!res.message) return fallback;
+  try {
+    const text = res.message.content[0].text.trim();
     return JSON.parse(text.startsWith('{') ? text : text.slice(text.indexOf('{')));
-  } catch (err) {
-    logMetric('recommendIntervention', 'claude-haiku-4-5-20251001', 0, false, err.message, 0);
-    return {
-      type: 'review_session',
-      title: `Address: ${cluster.topic}`,
-      content: `${cluster.question_count} students have questions about ${cluster.topic}. Consider a review session or targeted announcement.`,
-      urgency: cluster.severity,
-    };
+  } catch {
+    return fallback;
   }
 }
 
 // ─── generateProfessorAnnouncement ───────────────────────────────────────────
-async function generateProfessorAnnouncement(topic, insights) {
-  if (!anthropic) return `Dear class, I've noticed several questions about ${topic}. I'll address this in our next session.`;
-  try {
-    const start = Date.now();
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 350,
-      messages: [{
-        role: 'user',
-        content: `Draft a professional professor announcement to the class about ${topic}.
+async function generateProfessorAnnouncement(topic, insights, ctx = {}) {
+  const fallback = `Dear class, I've noticed several questions about ${topic}. I'll address this comprehensively in our upcoming sessions.`;
+  const res = await guardedCall(ctx, 'generateAnnouncement', '/interventions', () => anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 350,
+    messages: [{
+      role: 'user',
+      content: `Draft a professional professor announcement to the class about ${topic}.
 Context: ${insights}
 Keep it under 150 words, warm but professional, actionable.`,
-      }],
-    });
-    logMetric('generateAnnouncement', 'claude-haiku-4-5-20251001', Date.now() - start, true, null, 0);
-    return message.content[0].text;
-  } catch (err) {
-    logMetric('generateAnnouncement', 'claude-haiku-4-5-20251001', 0, false, err.message, 0);
-    return `Dear class, I've noticed several questions about ${topic}. I'll address this comprehensively in our upcoming sessions.`;
-  }
+    }],
+  }));
+  return res.message ? res.message.content[0].text : fallback;
 }
 
 // ─── summarizeDiscussionThread ───────────────────────────────────────────────
-async function summarizeDiscussionThread(question, replies) {
-  if (!anthropic || replies.length < 2) return null;
+async function summarizeDiscussionThread(question, replies, ctx = {}) {
+  if (replies.length < 2) return null;
   const thread = [question, ...replies.map(r => r.body)].join('\n\n');
-  try {
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 200,
-      messages: [{
-        role: 'user',
-        content: `Summarize this discussion thread in 2-3 sentences, capturing the key question and resolution:\n\n${thread.slice(0, 2000)}`,
-      }],
-    });
-    return message.content[0].text;
-  } catch {
-    return null;
-  }
+  const res = await guardedCall(ctx, 'summarizeThread', '/forum', () => anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 200,
+    messages: [{
+      role: 'user',
+      content: `Summarize this discussion thread in 2-3 sentences, capturing the key question and resolution:\n\n${thread.slice(0, 2000)}`,
+    }],
+  }));
+  return res.message ? res.message.content[0].text : null;
 }
 
 // ─── explainHomeworkMistake ──────────────────────────────────────────────────
-async function explainHomeworkMistake(rubricSection, studentWork, feedback) {
-  if (!anthropic) return feedback;
-  try {
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      messages: [{
-        role: 'user',
-        content: `Explain this student's mistake clearly and constructively. Be educational, not just critical.
+async function explainHomeworkMistake(rubricSection, studentWork, feedback, ctx = {}) {
+  const res = await guardedCall(ctx, 'explainMistake', '/self-check', () => anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 300,
+    messages: [{
+      role: 'user',
+      content: `Explain this student's mistake clearly and constructively. Be educational, not just critical.
 Rubric criterion: ${rubricSection}
 Student's work: ${studentWork.slice(0, 500)}
 Issue: ${feedback}
 
 Provide a clear 2-3 sentence explanation with a concrete fix suggestion.`,
-      }],
-    });
-    return message.content[0].text;
-  } catch {
-    return feedback;
-  }
+    }],
+  }));
+  return res.message ? res.message.content[0].text : feedback;
 }
 
 // ─── Full Workflow Router ─────────────────────────────────────────────────────
-async function routeQuestion(questionId, groupId, title, body) {
+// ctx { userId, ip } flows to the guard so per-user / per-IP caps apply.
+async function routeQuestion(questionId, groupId, title, body, ctx = {}) {
   const fullText = `${title} ${body}`;
   const result = {
     questionId,
@@ -330,7 +331,7 @@ async function routeQuestion(questionId, groupId, title, body) {
   };
 
   // 1. Classify topic
-  result.topic = await classifyTopic(fullText);
+  result.topic = await classifyTopic(fullText, ctx);
   db.prepare('UPDATE forum_questions SET topic = ? WHERE id = ?').run(result.topic, questionId);
 
   // 2. Check for duplicates (only check existing questions, not current)
@@ -368,13 +369,13 @@ async function routeQuestion(questionId, groupId, title, body) {
   }
 
   // 4. Generate AI answer (with RAG context injected if available)
-  const answer = await generateAnswerDraft(title, body, result.topic, ragChunks);
+  const answer = await generateAnswerDraft(title, body, result.topic, ragChunks, ctx);
   if (answer) {
     const ragSourcesJson = result.rag_sources.length > 0 ? JSON.stringify(result.rag_sources) : null;
     db.prepare('UPDATE forum_questions SET ai_answer = ?, ai_status = ?, rag_sources = ? WHERE id = ?').run(answer, 'pending', ragSourcesJson, questionId);
 
     // 5. Score confidence
-    result.confidence_score = await scoreAIConfidence(fullText, answer);
+    result.confidence_score = await scoreAIConfidence(fullText, answer, ctx);
     db.prepare('UPDATE forum_questions SET confidence_score = ? WHERE id = ?').run(result.confidence_score, questionId);
 
     if (result.confidence_score < 0.55) {

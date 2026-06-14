@@ -161,16 +161,19 @@ export function StudentSelfCheckPage() {
               </div>
             )}
 
-            {apiError && (
-              <div style={{ padding: "12px 16px", backgroundColor: "#fff0f2", border: "1px solid #f9a8b4", borderRadius: 8, fontSize: 13, color: palette.crimson, marginBottom: 16 }}>
-                <strong>Error:</strong> {apiError}
-                {apiError.includes("ANTHROPIC_API_KEY") && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>
-                    Add your API key to <code>server/.env</code> and restart the server.
-                  </div>
-                )}
-              </div>
-            )}
+            {apiError && (() => {
+              // A budget/rate block is an expected demo state, not an error — show it calmly (amber), not red.
+              const isBlocked = /demo mode|paused|limit|disabled|not configured/i.test(apiError);
+              return isBlocked ? (
+                <div style={{ padding: "12px 16px", backgroundColor: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 8, fontSize: 13, color: "#92600c", marginBottom: 16 }}>
+                  <strong>Live AI paused.</strong> {apiError} Seeded workflow data across the rest of D.I.Y.A still works.
+                </div>
+              ) : (
+                <div style={{ padding: "12px 16px", backgroundColor: "#fff0f2", border: "1px solid #f9a8b4", borderRadius: 8, fontSize: 13, color: palette.crimson, marginBottom: 16 }}>
+                  <strong>Error:</strong> {apiError}
+                </div>
+              );
+            })()}
 
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
               <div style={{ flex: "1 1 240px" }}>

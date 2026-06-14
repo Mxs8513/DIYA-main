@@ -141,13 +141,25 @@ test('admin metrics and queue-health return meaningful shapes', async () => {
   assert.ok('unresolved' in health.body);
 });
 
-test('self-check fails gracefully (503) when no API key is configured', async () => {
+test('self-check returns a graceful block (503) when AI is disabled — no crash', async () => {
   const { status, body } = await api('POST', '/api/ai/self-check', {
     token: ctx.stuToken,
     body: { rubric_text: 'rubric', work_text: 'work' },
   });
   assert.equal(status, 503);
-  assert.match(body.error, /not configured/i);
+  assert.equal(body.ai_blocked, true);
+  assert.match(body.error, /disabled|not configured|demo/i);
+});
+
+test('admin AI-usage summary returns budget + cap fields', async () => {
+  const { status, body } = await api('GET', '/api/admin/ai-usage', { token: ctx.profToken });
+  assert.equal(status, 200);
+  assert.equal(body.aiEnabled, false); // AI disabled in tests
+  assert.ok('todaySpendUsd' in body);
+  assert.ok('remainingDailyUsd' in body);
+  assert.ok('monthlyBudgetUsd' in body);
+  // the blocked self-check above recorded a success=0 usage event
+  assert.ok(body.blockedToday >= 1);
 });
 
 // ─── RBAC / authorization (the headline security fix) ────────────────────────

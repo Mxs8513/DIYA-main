@@ -253,8 +253,9 @@ Honest tradeoffs made to keep the project focused:
 - **Duplicate detection uses lexical Jaccard similarity**, not embeddings —
   cheap and dependency-free, but it misses paraphrases. Embedding-based dedupe
   (the RAG model is already loaded) is the natural upgrade.
-- **No rate limiting yet.** Documented intentionally (see Security below); the
-  next step is `express-rate-limit` on auth + AI endpoints.
+- **Single-node SQLite.** Fine for a demo; horizontal scaling would mean moving
+  the `server/db.js` schema (including the `ai_usage_events` ledger) to Postgres
+  and the budget counters to a shared store.
 - **No frontend component tests** (only type-check + build). React Testing
   Library / Vitest is the planned addition.
 - **RAG retrieval isn't unit-tested end-to-end** because it requires downloading
@@ -277,18 +278,33 @@ Honest tradeoffs made to keep the project focused:
   (raw files are never persisted).
 - **CORS** is env-configurable via `CORS_ORIGIN` (defaults to any localhost port
   for development).
-- **Rate limiting** is intentionally **not** included yet — out of scope for a
-  single-node demo. For production, add `express-rate-limit` to `/api/auth/*` and
-  the AI endpoints.
+- **Rate limiting** (`express-rate-limit`, behind `trust proxy`): `/api/auth` 5 per
+  10 min, `/api/ai` 20 per hour, `/api/knowledge` 10 per hour, per IP.
+- **AI cost controls** (defense-in-depth, so a public demo can't drain credits):
+  - **Master switch** `AI_ENABLED` — no Anthropic call is made unless it's `true`
+    **and** a key is set. A public demo should normally run with it **off**
+    (deterministic fallbacks + clear "AI disabled" UI).
+  - **Spend caps** — daily + monthly USD budgets, computed from an `ai_usage_events`
+    ledger that records token counts + estimated cost on every call.
+  - **Per-user / per-IP daily call caps**, with tighter caps for Self-Check and Analytics.
+  - When blocked, the server **stops calling Anthropic** and returns a polished
+    "live AI is paused" message; the Admin dashboard shows today's/month's spend,
+    remaining budget, and blocked calls (`GET /api/admin/ai-usage`).
+  - These code-level limits are **not a replacement** for a provider-side spend
+    cap — set a hard limit in the Anthropic Console too. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
 ## Deployment Notes
 
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for the full guide (Render/Railway/Fly +
+Vercel, env tables, and the credit-safety checklist). In short:
+
 - **Backend**: any Node host (Render/Railway/Fly/VM). Set `NODE_ENV=production`,
-  a strong `JWT_SECRET`, `CORS_ORIGIN=https://<your-frontend>`, and optionally
-  `ANTHROPIC_API_KEY`. SQLite (`DB_PATH`) needs a persistent disk; for higher
-  scale, migrate the schema in `server/db.js` to Postgres.
+  a strong `JWT_SECRET`, `CORS_ORIGIN=https://<your-frontend>`. For a public link,
+  leave `ANTHROPIC_API_KEY` unset / `AI_ENABLED=false` so it can't spend credits;
+  enable live AI only with budgets + a provider-side spend cap. SQLite (`DB_PATH`)
+  needs a persistent disk; for higher scale, migrate `server/db.js` to Postgres.
 - **Frontend**: `npm run build` → deploy the static `dist/` to any static host
   (Vercel/Netlify/S3). Point the SPA's `/api` calls at the deployed backend
   (replace the dev proxy with the API origin, or serve both behind one domain).

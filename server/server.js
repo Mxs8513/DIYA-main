@@ -1,18 +1,28 @@
-require('dotenv').config();
+// Load server/.env regardless of the process working directory, so it works
+// whether started via `npm run server` (cwd=repo root) or `cd server && npm start`.
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const { createDb } = require('./db');
 const workflow = require('./services/ai-workflow');
 const rag = require('./services/rag');
+const aiGuard = require('./services/ai-guard');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PROD = process.env.NODE_ENV === 'production';
+const IS_TEST = process.env.NODE_ENV === 'test';
+const AI_MODEL = 'claude-haiku-4-5-20251001';
+
+// Behind a single reverse proxy (Render/Railway/etc.) so req.ip is the real
+// client IP, which the rate limiter and per-IP AI caps rely on.
+app.set('trust proxy', 1);
 
 // JWT secret: a dev fallback is fine locally, but refuse to boot in production
 // without an explicit secret so a deploy can never run on a known-public key.
@@ -29,6 +39,21 @@ const corsOrigin = process.env.CORS_ORIGIN
   : /^http:\/\/localhost:\d+$/;
 app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
+
+// ─── Rate limiting ────────────────────────────────────────────────────────────
+// Per-IP request limiting (separate from the AI spend caps). Disabled under test
+// so the suite can register/login many times from 127.0.0.1.
+const makeLimiter = (windowMs, max, message) => rateLimit({
+  windowMs, max, standardHeaders: true, legacyHeaders: false,
+  skip: () => IS_TEST,
+  handler: (req, res) => res.status(429).json({ error: message }),
+});
+const authLimiter = makeLimiter(10 * 60 * 1000, 5, 'Too many attempts. Please wait a few minutes and try again.');
+const aiLimiter = makeLimiter(60 * 60 * 1000, 20, 'AI request limit reached for this hour. Please try again later.');
+const uploadLimiter = makeLimiter(60 * 60 * 1000, 10, 'Upload limit reached for this hour. Please try again later.');
+app.use('/api/auth', authLimiter);
+app.use('/api/ai', aiLimiter);
+app.use('/api/knowledge', uploadLimiter);
 
 // ─── Database ─────────────────────────────────────────────────────────────────
 const db = createDb();
@@ -203,8 +228,9 @@ app.post('/api/groups/:groupId/forum', requireAuth, requireGroupAccess('groupId'
   const grp = db.prepare('SELECT professor_id, name FROM groups WHERE id = ?').get(req.params.groupId);
   if (grp && grp.professor_id !== req.user.id) notify(grp.professor_id, 'new_question', 'New question in your class', `${req.user.name}: "${title.slice(0, 70)}"`, `/forum/${encodeURIComponent(grp.name)}`);
 
-  // Run workflow engine async (don't block response)
-  workflow.routeQuestion(result.lastInsertRowid, req.params.groupId, title, body).catch(console.error);
+  // Run workflow engine async (don't block response). ctx flows to the AI guard
+  // for per-user / per-IP spend caps.
+  workflow.routeQuestion(result.lastInsertRowid, req.params.groupId, title, body, { userId: req.user.id, ip: req.ip }).catch(console.error);
 });
 
 app.get('/api/forum/question/:id', requireAuth, (req, res) => {
@@ -308,14 +334,23 @@ app.post('/api/ai/self-check', requireAuth, requireRole('student'), async (req, 
   const { assignment_name, rubric_name, rubric_text, work_text } = req.body;
   if (!rubric_text || !work_text) return res.status(400).json({ error: 'Rubric and work text required' });
 
+  // AI guard: enforce enable/key/budget/per-user caps BEFORE touching the network.
+  const ctx = { userId: req.user.id, ip: req.ip };
+  const decision = aiGuard.canUseAI({ db, ...ctx, route: '/api/ai/self-check', requestType: 'selfCheck' });
+  if (!decision.allowed) {
+    aiGuard.recordAIUsage({ db, ...ctx, route: '/api/ai/self-check', requestType: 'selfCheck', model: AI_MODEL, success: false, blockedReason: decision.reason });
+    // Graceful, polished response (not a crash). 503 = disabled/unconfigured, 429 = capped.
+    const status = (decision.reason === 'ai_disabled' || decision.reason === 'no_api_key') ? 503 : 429;
+    return res.status(status).json({ error: decision.message, blocked_reason: decision.reason, ai_blocked: true });
+  }
+
   const Anthropic = require('@anthropic-ai/sdk');
-  const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
-  if (!anthropic) return res.status(503).json({ error: 'AI service not configured. Set ANTHROPIC_API_KEY in server/.env' });
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const start = Date.now();
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: AI_MODEL,
       max_tokens: 1100,
       messages: [{ role: 'user', content: `You are an academic grading assistant. Analyze the student's work against the rubric and provide detailed feedback.
 
@@ -327,7 +362,10 @@ Return ONLY valid JSON:
 {"letter_grade":"B+","score":"87/100","summary":"One sentence overall assessment","strengths":["Strength 1","Strength 2"],"improvements":[{"section":"Section","suggestion":"Specific suggestion"}]}` }],
     });
 
-    workflow.logMetric('selfCheck', 'claude-haiku-4-5-20251001', Date.now() - start, true, null, message.usage?.input_tokens + message.usage?.output_tokens);
+    const inputTokens = message.usage?.input_tokens || 0;
+    const outputTokens = message.usage?.output_tokens || 0;
+    aiGuard.recordAIUsage({ db, ...ctx, route: '/api/ai/self-check', requestType: 'selfCheck', model: AI_MODEL, inputTokens, outputTokens, estimatedCostUsd: aiGuard.estimateCostUsd({ inputTokens, outputTokens }), success: true });
+    workflow.logMetric('selfCheck', AI_MODEL, Date.now() - start, true, null, inputTokens + outputTokens);
 
     let analysis;
     try {
@@ -340,8 +378,9 @@ Return ONLY valid JSON:
     const result = db.prepare('INSERT INTO self_check_reports (user_id, assignment_name, rubric_name, letter_grade, score_text, improvements_json, raw_analysis) VALUES (?, ?, ?, ?, ?, ?, ?)').run(req.user.id, assignment_name || 'Assignment', rubric_name || 'Rubric', analysis.letter_grade, analysis.score, JSON.stringify(analysis.improvements), JSON.stringify(analysis));
     res.json({ id: result.lastInsertRowid, ...analysis, assignment_name: assignment_name || 'Assignment', rubric_name: rubric_name || 'Rubric' });
   } catch (err) {
-    workflow.logMetric('selfCheck', 'claude-haiku-4-5-20251001', Date.now() - start, false, err.message, 0);
-    res.status(500).json({ error: 'AI analysis failed: ' + err.message });
+    aiGuard.recordAIUsage({ db, ...ctx, route: '/api/ai/self-check', requestType: 'selfCheck', model: AI_MODEL, success: false, blockedReason: 'api_error' });
+    workflow.logMetric('selfCheck', AI_MODEL, Date.now() - start, false, err.message, 0);
+    res.status(502).json({ error: 'AI analysis is temporarily unavailable. Please try again.' });
   }
 });
 
@@ -451,7 +490,7 @@ app.get('/api/clusters/:groupId', requireAuth, requireGroupAccess('groupId'), (r
 app.post('/api/clusters/:clusterId/refresh-clusters', requireAuth, requireRole('professor'), async (req, res) => {
   const cluster = db.prepare('SELECT * FROM confusion_clusters WHERE id = ?').get(req.params.clusterId);
   if (!cluster) return res.status(404).json({ error: 'Cluster not found' });
-  const rec = await workflow.recommendIntervention(cluster);
+  const rec = await workflow.recommendIntervention(cluster, { userId: req.user.id, ip: req.ip });
   res.json({ recommendation: rec, cluster });
 });
 
@@ -487,7 +526,7 @@ app.post('/api/interventions/:groupId', requireAuth, requireRole('professor'), r
 app.post('/api/interventions/:id/generate-announcement', requireAuth, requireRole('professor'), async (req, res) => {
   const { topic, insights } = req.body;
   if (!topic) return res.status(400).json({ error: 'Topic required' });
-  const text = await workflow.generateProfessorAnnouncement(topic, insights || `Students have been asking many questions about ${topic}.`);
+  const text = await workflow.generateProfessorAnnouncement(topic, insights || `Students have been asking many questions about ${topic}.`, { userId: req.user.id, ip: req.ip });
   res.json({ announcement: text });
 });
 
@@ -513,23 +552,38 @@ app.post('/api/approved-answers/:groupId', requireAuth, requireRole('professor')
 // ─── AI ANALYSIS ──────────────────────────────────────────────────────────────
 app.get('/api/ai/analysis/:groupId', requireAuth, requireGroupAccess('groupId'), async (req, res) => {
   const questions = db.prepare('SELECT q.title, q.body, q.tags, q.created_at FROM forum_questions q WHERE q.group_id = ? ORDER BY q.created_at DESC LIMIT 50').all(req.params.groupId);
-  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'AI service not configured' });
   if (questions.length === 0) return res.json({ topics: [], insights: [], total_questions: 0 });
+
+  // AI guard: enforce enable/key/budget/per-user analysis caps before calling.
+  const ctx = { userId: req.user.id, ip: req.ip };
+  const decision = aiGuard.canUseAI({ db, ...ctx, route: '/api/ai/analysis', requestType: 'analysis' });
+  if (!decision.allowed) {
+    aiGuard.recordAIUsage({ db, ...ctx, route: '/api/ai/analysis', requestType: 'analysis', model: AI_MODEL, success: false, blockedReason: decision.reason });
+    const status = (decision.reason === 'ai_disabled' || decision.reason === 'no_api_key') ? 503 : 429;
+    return res.status(status).json({ error: decision.message, blocked_reason: decision.reason, ai_blocked: true });
+  }
 
   const Anthropic = require('@anthropic-ai/sdk');
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const start = Date.now();
   try {
     const qText = questions.map((q, i) => `${i + 1}. "${q.title}": ${q.body.slice(0, 200)}`).join('\n');
     const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: AI_MODEL,
       max_tokens: 1200,
       messages: [{ role: 'user', content: `Analyze these student questions and identify confusion clusters. Return only JSON:\n{"topics":[{"id":"slug","name":"Topic","count":5,"trend":"rising","status":"needs-attention","insight":"...","recommendation":"..."}],"overall_summary":"..."}\n\nRules: trend: rising/steady/declining, status: needs-attention/proficient, sort by count, 4-7 topics.\n\nQUESTIONS:\n${qText}` }],
     });
+    const inputTokens = message.usage?.input_tokens || 0;
+    const outputTokens = message.usage?.output_tokens || 0;
+    aiGuard.recordAIUsage({ db, ...ctx, route: '/api/ai/analysis', requestType: 'analysis', model: AI_MODEL, inputTokens, outputTokens, estimatedCostUsd: aiGuard.estimateCostUsd({ inputTokens, outputTokens }), success: true });
+    workflow.logMetric('analysis', AI_MODEL, Date.now() - start, true, null, inputTokens + outputTokens);
     const text = message.content[0].text.trim();
     const analysis = JSON.parse(text.startsWith('{') ? text : text.slice(text.indexOf('{')));
     res.json({ ...analysis, total_questions: questions.length });
   } catch (err) {
-    res.status(500).json({ error: 'Analysis failed: ' + err.message });
+    aiGuard.recordAIUsage({ db, ...ctx, route: '/api/ai/analysis', requestType: 'analysis', model: AI_MODEL, success: false, blockedReason: 'api_error' });
+    workflow.logMetric('analysis', AI_MODEL, Date.now() - start, false, err.message, 0);
+    res.status(502).json({ error: 'Analysis is temporarily unavailable. Please try again.' });
   }
 });
 
@@ -589,6 +643,11 @@ app.get('/api/admin/queue-health', requireAuth, requireRole('professor'), (req, 
   const pendingReview = db.prepare("SELECT COUNT(*) as c FROM forum_questions WHERE ai_status = 'pending' AND ai_answer IS NOT NULL").get()?.c || 0;
   const draftInterventions = db.prepare("SELECT COUNT(*) as c FROM interventions WHERE status = 'draft'").get()?.c || 0;
   res.json({ unresolved, criticalClusters, pendingReview, draftInterventions });
+});
+
+// AI usage / spend visibility (today + month, budgets, blocked calls).
+app.get('/api/admin/ai-usage', requireAuth, requireRole('professor'), (req, res) => {
+  res.json(aiGuard.getAIUsageSummary(db));
 });
 
 // ─── RAG / KNOWLEDGE BASE ─────────────────────────────────────────────────────
@@ -655,7 +714,15 @@ app.patch('/api/notifications/:id/read', requireAuth, (req, res) => {
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', ai_enabled: !!process.env.ANTHROPIC_API_KEY, db: 'connected', version: '2.1.0-rag' });
+  const cfg = aiGuard.config();
+  // ai_enabled reflects the real gate: enabled flag AND a key present.
+  res.json({
+    status: 'ok',
+    ai_enabled: cfg.aiEnabled && cfg.hasApiKey,
+    public_demo_mode: cfg.publicDemoMode,
+    db: 'connected',
+    version: '2.2.0-ai-caps',
+  });
 });
 
 // ─── Unknown API route → JSON 404 (instead of HTML) ──────────────────────────

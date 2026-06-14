@@ -94,6 +94,7 @@ export const api = {
   admin: {
     metrics: () => request<AdminMetrics>('/admin/metrics'),
     queueHealth: () => request<QueueHealth>('/admin/queue-health'),
+    aiUsage: () => request<AIUsageSummary>('/admin/ai-usage'),
   },
 
   knowledge: {
@@ -175,6 +176,13 @@ export interface AdminMetrics {
 }
 
 export interface QueueHealth { unresolved: number; criticalClusters: number; pendingReview: number; draftInterventions: number; }
+
+export interface AIUsageSummary {
+  aiEnabled: boolean; publicDemoMode: boolean;
+  todayCalls: number; todaySpendUsd: number; monthlySpendUsd: number; blockedToday: number;
+  dailyBudgetUsd: number; monthlyBudgetUsd: number; remainingDailyUsd: number; remainingMonthlyUsd: number;
+  callsByType: { request_type: string; calls: number; blocked: number; cost: number }[];
+}
 
 export function saveAuth(token: string, user: User) { localStorage.setItem('diya_token', token); localStorage.setItem('diya_user', JSON.stringify(user)); }
 export function getUser(): User | null { const u = localStorage.getItem('diya_user'); return u ? JSON.parse(u) : null; }
