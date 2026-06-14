@@ -32,3 +32,8 @@ yarn-error.log*
 # Firebase / service account keys
 *serviceAccount*.json
 firebase-adminsdk*.json
+
+# SQLite database files (regenerated via seed.js)
+*.db
+*.db-shm
+*.db-wal
