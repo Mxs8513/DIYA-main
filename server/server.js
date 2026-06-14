@@ -48,7 +48,7 @@ const makeLimiter = (windowMs, max, message) => rateLimit({
   skip: () => IS_TEST,
   handler: (req, res) => res.status(429).json({ error: message }),
 });
-const authLimiter = makeLimiter(10 * 60 * 1000, 5, 'Too many attempts. Please wait a few minutes and try again.');
+const authLimiter = makeLimiter(10 * 60 * 1000, 20, 'Too many attempts. Please wait a few minutes and try again.');
 const aiLimiter = makeLimiter(60 * 60 * 1000, 20, 'AI request limit reached for this hour. Please try again later.');
 const uploadLimiter = makeLimiter(60 * 60 * 1000, 10, 'Upload limit reached for this hour. Please try again later.');
 app.use('/api/auth', authLimiter);

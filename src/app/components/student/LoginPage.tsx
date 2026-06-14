@@ -33,10 +33,13 @@ export function LoginPage() {
   };
 
   // One-click demo access — logs in with the seeded accounts so a recruiter can
-  // explore instantly without knowing any credentials. The API runs on a free
-  // tier that sleeps when idle, so the first request after a nap can fail/502
-  // while it wakes (~30–50s). We retry transparently with a friendly message
-  // instead of surfacing a scary error.
+  // explore instantly without knowing any credentials.
+  //
+  // The API runs on a free tier that sleeps when idle; the first request after a
+  // nap returns 502 for up to ~60-70s while it boots. So instead of hammering the
+  // (rate-limited) login endpoint, we poll the un-throttled /api/health until the
+  // server is awake, then log in exactly once. This survives a long cold start
+  // and never trips the auth rate limiter.
   const demoLogin = async (role: "professor" | "student") => {
     const creds = role === "professor"
       ? { email: "dr.chen@university.edu", password: "demo1234" }
@@ -44,23 +47,32 @@ export function LoginPage() {
     setError("");
     setLoading(true);
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const maxAttempts = 8;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+
+    const tryLogin = async () => {
+      const { token, user } = await api.auth.login(creds.email, creds.password);
+      saveAuth(token, user);
+      setStatus("");
+      navigate(user.role === "professor" ? "/professor" : "/groups");
+    };
+
+    // Fast path: server already warm → straight in.
+    try { await tryLogin(); return; } catch { /* probably cold — wake it */ }
+
+    // Wake path: poll health (not rate-limited) until awake, then log in.
+    const deadline = Date.now() + 90000; // up to ~90s, comfortably past a cold start
+    while (Date.now() < deadline) {
+      const secs = Math.round((90000 - (deadline - Date.now())) / 1000);
+      setStatus(`Waking up the demo server… first load can take up to ~60s (${secs}s elapsed)`);
       try {
-        const { token, user } = await api.auth.login(creds.email, creds.password);
-        saveAuth(token, user);
-        setStatus("");
-        navigate(user.role === "professor" ? "/professor" : "/groups");
+        await api.health();   // 200 only once the server has finished booting
+        await tryLogin();
         return;
       } catch {
-        if (attempt < maxAttempts) {
-          setStatus(`Waking up the demo server… (~30s on first load) · attempt ${attempt}/${maxAttempts}`);
-          await sleep(5000);
-        }
+        await sleep(5000);
       }
     }
     setStatus("");
-    setError("The demo server is taking longer than usual to wake up. Please give it a minute and click again.");
+    setError("The demo server is taking unusually long to wake. Please wait a minute and click again.");
     setLoading(false);
   };
 
