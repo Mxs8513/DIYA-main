@@ -32,12 +32,22 @@ if (IS_PROD && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'diya-dev-
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
-// CORS is env-configurable for deployment. CORS_ORIGIN can be a comma-separated
-// allowlist; if unset we allow any localhost port for local development.
-const corsOrigin = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
-  : /^http:\/\/localhost:\d+$/;
-app.use(cors({ origin: corsOrigin, credentials: true }));
+// CORS allowlist: exact origins from CORS_ORIGIN (comma-separated) PLUS a few
+// robust patterns so the demo works from any of its Vercel URLs (production AND
+// preview/deployment URLs) and from localhost — without needing the env value to
+// match a single origin exactly (a common foot-gun, e.g. a trailing slash).
+const exactOrigins = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+const originPatterns = [
+  /^http:\/\/localhost:\d+$/,
+  /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/, // any *.vercel.app (prod + previews)
+];
+function corsOriginCheck(origin, cb) {
+  // No Origin header → non-browser client (curl, health checks) → allow.
+  if (!origin) return cb(null, true);
+  if (exactOrigins.includes(origin) || originPatterns.some(re => re.test(origin))) return cb(null, true);
+  return cb(null, false); // not allowed: cors simply omits the ACAO header
+}
+app.use(cors({ origin: corsOriginCheck, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
