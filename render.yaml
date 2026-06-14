@@ -1,14 +1,19 @@
 # Render Blueprint for the D.I.Y.A backend API.
 # Deploy: Render Dashboard → New → Blueprint → pick this repo. Render reads this
-# file and provisions the service. Set CORS_ORIGIN to your Vercel URL afterward.
+# file and provisions the service. After the frontend is up, set CORS_ORIGIN to
+# your Vercel URL, and add ANTHROPIC_API_KEY as a SECRET in the dashboard.
 #
-# Defaults below are the RECRUITER-SAFE, KEYLESS configuration: no Anthropic key,
-# AI_ENABLED=false → the public link cannot spend any credits ($0). Seeded AI
-# workflow data and one-click demo logins still work.
+# This is the LIVE-BUT-CAPPED configuration: real AI is enabled, protected by
+# tight daily/monthly spend caps + per-user/per-IP rate caps. The public link
+# can spend at most ~AI_DAILY_BUDGET_USD/day and ~AI_MONTHLY_BUDGET_USD/month.
 #
-# To enable live (capped) AI instead, add ANTHROPIC_API_KEY as a SECRET in the
-# dashboard and set AI_ENABLED=true — and set a hard spend cap in the Anthropic
-# Console. See DEPLOYMENT.md.
+# ⚠️ SECURITY:
+#   - ANTHROPIC_API_KEY is `sync: false` → it is NOT in this file / git. Paste it
+#     into the Render dashboard (Environment → add secret). Never commit a key.
+#   - Also set a HARD spend limit in the Anthropic Console — the in-app caps are
+#     defense-in-depth, not a replacement. Rotate the key when you're done.
+#   - To make the demo fully keyless/$0 instead, set AI_ENABLED=false and remove
+#     the key. See DEPLOYMENT.md.
 services:
   - type: web
     name: diya-api
@@ -23,11 +28,31 @@ services:
       - key: NODE_ENV
         value: production
       - key: JWT_SECRET
-        generateValue: true          # Render generates a strong random secret
+        generateValue: true            # Render generates a strong random secret
       - key: AI_ENABLED
-        value: "false"               # keyless demo → $0
+        value: "true"                  # live AI ON — bounded by the caps below
       - key: AI_PUBLIC_DEMO_MODE
-        value: "true"
+        value: "true"                  # blocked calls show "public demo, limited"
+      # ── Spend caps (the backstop that bounds cost) ──
+      - key: AI_DAILY_BUDGET_USD
+        value: "0.25"
+      - key: AI_MONTHLY_BUDGET_USD
+        value: "2.00"
+      # ── Per-identity rate caps ──
+      - key: AI_MAX_CALLS_PER_USER_PER_DAY
+        value: "12"
+      - key: AI_MAX_CALLS_PER_IP_PER_DAY
+        value: "30"
+      - key: AI_MAX_SELF_CHECKS_PER_USER_PER_DAY
+        value: "3"
+      - key: AI_MAX_ANALYSIS_CALLS_PER_USER_PER_DAY
+        value: "3"
+      # ── Pricing used to estimate spend (USD per 1M tokens) ──
+      - key: AI_INPUT_PRICE_PER_MILLION
+        value: "1.00"
+      - key: AI_OUTPUT_PRICE_PER_MILLION
+        value: "5.00"
       - key: CORS_ORIGIN
-        sync: false                  # set to your Vercel URL after frontend deploy
-      # ANTHROPIC_API_KEY intentionally omitted for the public demo.
+        sync: false                    # set to your Vercel URL after frontend deploy
+      - key: ANTHROPIC_API_KEY
+        sync: false                    # paste into Render dashboard — NEVER commit

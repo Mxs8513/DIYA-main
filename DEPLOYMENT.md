@@ -25,15 +25,20 @@ If you *do* enable live AI on a public URL:
 
 ---
 
-## Quickstart — exact clicks (keyless public demo, $0)
+## Quickstart — exact clicks (live AI, capped)
+
+> This repo's `render.yaml` ships the **live-but-capped** config (`AI_ENABLED=true`,
+> daily `$0.25` / monthly `$2.00` budgets, per-user/IP caps). To run **keyless / $0**
+> instead, set `AI_ENABLED=false` and skip the key step. **Always** also set a hard
+> spend cap in the [Anthropic Console](https://console.anthropic.com/settings/limits).
 
 **1. Backend → Render** (≈3 min)
 1. [dashboard.render.com](https://dashboard.render.com) → **New +** → **Blueprint** → connect GitHub → pick `Mxs8513/DIYA-main`.
-2. Render reads `render.yaml` and shows a `diya-api` web service (free plan, root `server/`, build `npm install`, start `npm run deploy:start`). `JWT_SECRET` auto-generates; `AI_ENABLED=false`; **no** `ANTHROPIC_API_KEY`.
-3. Leave `CORS_ORIGIN` blank for now → **Apply**. Wait for "Live", then copy the URL, e.g. `https://diya-api.onrender.com`.
-4. Verify: open `https://diya-api.onrender.com/api/health` → `{"status":"ok","ai_enabled":false,"public_demo_mode":true,...}`.
+2. Render reads `render.yaml` and shows a `diya-api` web service (free plan, root `server/`, build `npm install`, start `npm run deploy:start`). `JWT_SECRET` auto-generates; the caps are pre-filled.
+3. You'll be prompted for the `sync:false` vars: leave `CORS_ORIGIN` blank for now, and **paste your `ANTHROPIC_API_KEY`** (Render stores it encrypted — it is never in git). → **Apply**.
+4. Wait for "Live", copy the URL (e.g. `https://diya-api.onrender.com`), and verify `…/api/health` → `{"status":"ok","ai_enabled":true,"public_demo_mode":true,...}`.
 
-   _(Prefer not to use a Blueprint? New + → Web Service → repo → Root Dir `server`, Build `npm install`, Start `npm run deploy:start`, and add the env vars from the table below by hand.)_
+   _(Prefer not to use a Blueprint? New + → Web Service → repo → Root Dir `server`, Build `npm install`, Start `npm run deploy:start`, and add the env vars from the table below by hand — including `ANTHROPIC_API_KEY` as a secret.)_
 
 **2. Frontend → Vercel** (≈2 min)
 1. [vercel.com/new](https://vercel.com/new) → import `Mxs8513/DIYA-main`. Framework **Vite**, Build `npm run build`, Output `dist` (auto-detected; `vercel.json` confirms it).
@@ -43,7 +48,7 @@ If you *do* enable live AI on a public URL:
 **3. Close the CORS loop**
 1. Render → `diya-api` → **Environment** → set `CORS_ORIGIN` = your exact Vercel URL (e.g. `https://diya-main.vercel.app`, no trailing slash) → **Save** (auto-redeploys).
 
-**4. Smoke test** — open the Vercel URL → **Enter as Professor** → dashboard, Workflow Queue, Admin (the "Live AI Spend & Caps" panel shows `LIVE AI OFF`) → **Enter as Student** → forum + Self-Check (shows the calm "AI disabled" state). No Anthropic calls occur.
+**4. Smoke test** — open the Vercel URL → **Enter as Professor** → dashboard, Workflow Queue, Admin (the "Live AI Spend & Caps" panel shows `LIVE AI ON` with today's spend vs. the cap) → **Enter as Student** → forum + Self-Check. Post one question to confirm real generation; watch Admin spend tick up and stop at the daily cap.
 
 ---
 
