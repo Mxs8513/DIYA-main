@@ -4,12 +4,12 @@
 
 ## 🔗 Live Demo
 
-- **Live app:** _<!-- TODO: paste Vercel URL, e.g. https://diya-main.vercel.app -->_
-- **API health:** _<!-- TODO: paste Render URL + /api/health -->_
+- **Live app:** https://diya-main.vercel.app
+- **API health:** https://diya-api.onrender.com/api/health
 - **Source:** https://github.com/Mxs8513/DIYA-main
-- **Walkthrough (Loom):** _<!-- TODO: optional Loom link -->_
+- **Walkthrough (Loom):** _<!-- optional: add a Loom link -->_
 
-No signup needed — on the login page click **Enter as Professor** or **Enter as Student** to explore a seeded CHEM 1301 class.
+No signup needed — on the login page click **Enter as Professor** or **Enter as Student** to explore a seeded CHEM 1301 class. _(The API is on a free tier that sleeps when idle, so the very first request may take ~30–50s to wake; it's fast afterward.)_
 
 > **Demo mode:** the public demo runs **live AI, strictly capped** to protect API usage — a tight daily/monthly spend budget plus per-user and per-IP rate limits ([details](#security-notes)). Post a question or run Self-Check to see real generation; once the demo's small budget is reached, the app shows a polished "live AI paused" message and the seeded AI workflow data (answers, confidence scores, escalations, clusters, interventions, metrics) remains fully explorable. The Admin dashboard shows live spend vs. the cap.
 
