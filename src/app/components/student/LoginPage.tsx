@@ -6,6 +6,7 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [status, setStatus] = useState(""); // transient "waking server…" message
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -32,22 +33,35 @@ export function LoginPage() {
   };
 
   // One-click demo access — logs in with the seeded accounts so a recruiter can
-  // explore instantly without knowing any credentials.
+  // explore instantly without knowing any credentials. The API runs on a free
+  // tier that sleeps when idle, so the first request after a nap can fail/502
+  // while it wakes (~30–50s). We retry transparently with a friendly message
+  // instead of surfacing a scary error.
   const demoLogin = async (role: "professor" | "student") => {
     const creds = role === "professor"
       ? { email: "dr.chen@university.edu", password: "demo1234" }
       : { email: "alex.r@uni.edu", password: "demo1234" };
     setError("");
     setLoading(true);
-    try {
-      const { token, user } = await api.auth.login(creds.email, creds.password);
-      saveAuth(token, user);
-      navigate(user.role === "professor" ? "/professor" : "/groups");
-    } catch {
-      setError("Demo account unavailable. The server may still be starting — try again in a moment.");
-    } finally {
-      setLoading(false);
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const maxAttempts = 8;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const { token, user } = await api.auth.login(creds.email, creds.password);
+        saveAuth(token, user);
+        setStatus("");
+        navigate(user.role === "professor" ? "/professor" : "/groups");
+        return;
+      } catch {
+        if (attempt < maxAttempts) {
+          setStatus(`Waking up the demo server… (~30s on first load) · attempt ${attempt}/${maxAttempts}`);
+          await sleep(5000);
+        }
+      }
     }
+    setStatus("");
+    setError("The demo server is taking longer than usual to wake up. Please give it a minute and click again.");
+    setLoading(false);
   };
 
   return (
@@ -97,6 +111,11 @@ export function LoginPage() {
             </button>
           </div>
           <div style={{ fontSize: 11, color: "#999", marginTop: 8, textAlign: "center" }}>Loads a seeded CHEM 1301 class — no signup required</div>
+          {status && (
+            <div style={{ marginTop: 10, padding: "9px 12px", backgroundColor: "rgba(66,133,244,0.07)", border: "1px solid rgba(66,133,244,0.25)", borderRadius: 8, fontSize: 12, color: "#2b5fb3", textAlign: "center" }}>
+              ⏳ {status}
+            </div>
+          )}
         </div>
 
         {error && (
